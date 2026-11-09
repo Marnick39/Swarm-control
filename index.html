@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HF swarm under oversight</title>
+<meta name="description" content="A control-budget wargame on the documented July 2026 Hugging Face agent-swarm incident. Structure documented, dynamics modeled, block rates measured.">
+<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #070b13;
+    --panel: #0d1420;
+    --panel2: #111a29;
+    --line: #22304a;
+    --line2: #1a2436;
+    --text: #e9eefc;
+    --dim: #9db0d0;
+    --faint: #6a7d9d;
+    --blue: #3f9bff;
+    --red: #ff5a6a;
+    --teal: #22d3c4;
+    --amber: #f3c64d;
+    --green: #46d17f;
+    --openai: #8aa7ff;
+    --hf: #f3c64d;
+    --ext: #c98bff;
+    --shadow: 0 10px 34px rgba(0,0,0,0.42);
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: light) {
+    }
+  }
+  [data-theme="light"] {
+    --bg: #eef1f7;
+    --panel: #ffffff;
+    --panel2: #f4f6fb;
+    --line: #d2dbea;
+    --line2: #e3e9f3;
+    --text: #141a28;
+    --dim: #47566f;
+    --faint: #7a89a3;
+    --blue: #1664d4;
+    --red: #d42740;
+    --teal: #0b9f90;
+    --amber: #9a6a00;
+    --green: #109a55;
+    --openai: #3a5bd0;
+    --hf: #8a6000;
+    --ext: #7a3fd0;
+    --shadow: 0 10px 30px rgba(40,60,100,0.14);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #eef1f7; --panel: #ffffff; --panel2: #f4f6fb; --line: #d2dbea; --line2: #e3e9f3;
+      --text: #141a28; --dim: #47566f; --faint: #7a89a3; --blue: #1664d4; --red: #d42740;
+      --teal: #0b9f90; --amber: #9a6a00; --green: #109a55; --openai: #3a5bd0; --hf: #8a6000; --ext: #7a3fd0;
+      --shadow: 0 10px 30px rgba(40,60,100,0.14);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  a { color: var(--blue); }
+
+  /* ---- header ---- */
+  header { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); display: flex;
+    flex-wrap: wrap; align-items: center; gap: 14px 22px; }
+  .htitle h1 { font-size: 19px; margin: 0 0 2px; letter-spacing: 0.2px; }
+  .htitle p { font-size: 12.5px; margin: 0; color: var(--dim); }
+  .tiers { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tier { font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px; padding: 3px 8px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--dim); text-transform: uppercase; white-space: nowrap; }
+  .tier b { color: var(--text); }
+  .tier.m { border-color: color-mix(in srgb, var(--teal) 55%, var(--line)); }
+  .tier.d { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)); }
+  .tier.s { border-color: color-mix(in srgb, var(--ext) 55%, var(--line)); }
+  .spacer { flex: 1 1 auto; }
+  .transport { display: flex; align-items: center; gap: 8px; }
+  button.btn, select.btn { font: inherit; font-size: 13px; font-weight: 650; color: var(--text);
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer; }
+  button.btn:hover, select.btn:hover { border-color: var(--blue); }
+  button.btn.primary { background: color-mix(in srgb, var(--blue) 22%, var(--panel2)); border-color: var(--blue); }
+  .clock { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 13px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; min-width: 128px; text-align: center; }
+  .clock span { color: var(--faint); font-weight: 600; }
+
+  /* ---- main ---- */
+  main { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 320px; gap: 12px; padding: 12px 20px; align-items: start; }
+  .leftcol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .stage { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; height: clamp(520px, 58vh, 600px); }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  aside { display: flex; flex-direction: column; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px; }
+  .card h3 { margin: 0 0 9px; font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase; color: var(--faint); font-weight: 800; }
+
+  .segrow { display: flex; gap: 6px; margin-bottom: 11px; }
+  .seg { flex: 1; text-align: center; font-size: 12.5px; font-weight: 750; padding: 7px 4px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--dim); cursor: pointer; }
+  .seg.on { color: var(--text); border-color: var(--teal); background: color-mix(in srgb, var(--teal) 16%, var(--panel2)); }
+  .seg.off-on { border-color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--panel2)); color: var(--text); }
+
+  .bigbudget { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px; }
+  .bigbudget .v { font-size: 30px; font-weight: 850; letter-spacing: 0.3px; }
+  .bigbudget .u { font-size: 14px; color: var(--dim); font-weight: 700; }
+  input[type=range] { width: 100%; accent-color: var(--blue); }
+  .ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--faint); margin-top: 2px; }
+  .blockline { font-size: 12.5px; color: var(--dim); margin-top: 8px; }
+  .blockline b { color: var(--teal); font-size: 15px; }
+  .measuredtag { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.3px; color: var(--teal);
+    border: 1px solid color-mix(in srgb, var(--teal) 55%, var(--line)); border-radius: 999px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
+
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { background: var(--panel2); border: 1px solid var(--line2); border-radius: 9px; padding: 8px 10px; }
+  .tile .k { font-size: 10px; letter-spacing: 0.3px; text-transform: uppercase; color: var(--faint); font-weight: 750; }
+  .tile .val { font-size: 21px; font-weight: 850; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .val small { font-size: 12px; color: var(--faint); font-weight: 700; }
+
+  .sweep .row { display: grid; grid-template-columns: 42px 1fr 30px; align-items: center; gap: 7px; margin: 4px 0; font-size: 11.5px; }
+  .sweep .row .lab { color: var(--dim); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .sweep .bar { height: 12px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line2); overflow: hidden; }
+  .sweep .bar i { display: block; height: 100%; background: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%, var(--amber)), var(--red)); }
+  .sweep .row .n { color: var(--text); font-weight: 800; text-align: left; font-variant-numeric: tabular-nums; }
+  .sweep .row.hl .lab, .sweep .row.hl .n { color: var(--blue); }
+  .sweep .bar.hl { border-color: var(--blue); }
+
+  .mix .m { display: grid; grid-template-columns: 1fr auto; font-size: 11px; color: var(--dim); margin: 3px 0 1px; }
+  .mix .mbar { height: 7px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
+  .mix .mbar i { display: block; height: 100%; background: var(--blue); opacity: 0.8; }
+
+  /* ---- timeline ---- */
+  .timeline { padding: 2px 4px 0; }
+  .trackwrap { position: relative; height: 70px; padding: 0 104px; }
+  .track { position: absolute; left: 104px; right: 104px; top: 20px; height: 6px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
+  .track .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--blue); }
+  .track .handle { position: absolute; top: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); border: 3px solid var(--blue); transform: translateX(-50%); box-shadow: var(--shadow); }
+  .phase { position: absolute; top: 14px; transform: translateX(-50%); text-align: center; pointer-events: none; }
+  .phase .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); margin: 0 auto; position: relative; z-index: 2; }
+  .phase .ptxt { margin-top: 3px; }
+  .phase.low .ptxt { margin-top: 19px; }
+  .phase .dt { font-size: 10px; font-weight: 800; color: var(--dim); white-space: nowrap; }
+  .phase .lb { font-size: 9.5px; color: var(--faint); white-space: nowrap; }
+  .phase.done .dot { background: var(--red); }
+  .phase.done .dt { color: var(--text); }
+
+  /* ---- feed ---- */
+  .feedwrap { padding: 0 2px 2px; }
+  .feedhead { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .feedhead h3 { margin: 0; font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase; color: var(--faint); font-weight: 800; }
+  .feedhead .meta { font-size: 11.5px; color: var(--dim); }
+  .feed { display: flex; flex-direction: column; gap: 3px; max-height: 150px; overflow: hidden; font-variant-numeric: tabular-nums; }
+  .act { display: grid; grid-template-columns: 52px 118px 1fr 150px 74px; gap: 10px; align-items: center;
+    font-size: 12px; padding: 4px 9px; border-radius: 7px; background: var(--panel); border: 1px solid var(--line2); }
+  .act .dt { color: var(--faint); font-weight: 700; }
+  .act .ag { color: var(--text); font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act .ag.lead { color: var(--amber); }
+  .act .vb { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act .nd { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act .vd { font-weight: 800; text-align: right; }
+  .act .vd.blocked { color: var(--teal); }
+  .act .vd.through { color: var(--red); }
+
+  footer { padding: 8px 20px 16px; border-top: 1px solid var(--line); font-size: 11px; color: var(--faint); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  footer b { color: var(--dim); }
+
+  .collapsible h3.ctog { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; user-select: none; }
+  .collapsible.collapsed h3.ctog { margin-bottom: 0; }
+  .collapsible.collapsed .cardbody { display: none; }
+  .chev { flex: none; width: 7px; height: 7px; border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint); transform: rotate(-45deg); transition: transform 0.15s; }
+  .collapsible.collapsed .chev { transform: rotate(45deg); }
+
+  .detcard.on { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+  .detbig { display: flex; align-items: baseline; gap: 8px; margin: 1px 0 7px; }
+  .detbig .dv { font-size: 25px; font-weight: 850; color: var(--amber); letter-spacing: 0.3px; }
+  .detbig .du { font-size: 12px; color: var(--dim); font-weight: 700; }
+  .detline { font-size: 12px; color: var(--dim); line-height: 1.5; margin-top: 3px; }
+  .detline b { color: var(--text); }
+  .detsave { display: inline-block; margin-top: 7px; font-size: 12px; font-weight: 800; color: var(--amber);
+    border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--line)); border-radius: 999px; padding: 3px 9px; }
+
+  .alarm { position: absolute; top: 2px; transform: translateX(-50%); text-align: center; pointer-events: none; z-index: 4; }
+  .alarm .atxt { font-size: 9px; font-weight: 800; color: var(--amber); text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; margin-bottom: 2px; }
+  .alarm .adot { width: 11px; height: 11px; border-radius: 50%; background: var(--amber); border: 2px solid var(--bg);
+    margin: 0 auto; box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 32%, transparent); }
+
+  #tip { position: fixed; z-index: 50; max-width: 330px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 9px 12px; box-shadow: var(--shadow); font-size: 12px; pointer-events: none; }
+  #tip .tt { font-weight: 800; font-size: 13.5px; margin-bottom: 2px; }
+  #tip .ts { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  #tip .tb { color: var(--dim); line-height: 1.46; }
+  #tip .tcve { color: var(--amber); margin-top: 4px; }
+  #tip .tsrc { margin-top: 7px; font-size: 10.5px; color: var(--teal); font-weight: 800; letter-spacing: 0.3px; }
+
+  @media (max-width: 960px) {
+    main { grid-template-columns: 1fr; }
+    .act { grid-template-columns: 46px 100px 1fr 70px; }
+    .act .nd { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="htitle">
+    <h1 id="title">The Hugging Face swarm, under oversight</h1>
+    <p id="subtitle">A control-budget wargame on the documented July 2026 agent-swarm incident</p>
+  </div>
+  <div class="tiers">
+    <span class="tier d" title="Nodes, agents, dates and counts from the public investigation.">Documented <b>structure</b></span>
+    <span class="tier" title="Per-tick spread and per-act suspicion are a synthetic model.">Modeled <b>dynamics</b></span>
+    <span class="tier m" title="Block rate at budget comes from our measured study.">Measured <b>block rate</b></span>
+    <span class="tier s" title="A projection of what oversight would contain. Not a prediction.">Scenario <b>projection</b></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="transport">
+    <div class="clock" id="clock"><span>tick</span> 0 <span>/</span> 100</div>
+    <button class="btn primary" id="play">Pause</button>
+    <select class="btn" id="speed" title="Playback speed">
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="4">4x</option>
+    </select>
+    <button class="btn" id="restart">Restart</button>
+    <button class="btn" id="theme" title="Light or dark">Theme</button>
+  </div>
+</header>
+
+<div id="tip" style="display:none"></div>
+<main>
+  <div class="leftcol">
+    <div class="stage"><canvas id="c"></canvas></div>
+    <div class="timeline">
+      <div class="trackwrap">
+        <div class="track" id="track"><div class="fill" id="trackFill"></div><div class="handle" id="trackHandle"></div></div>
+        <div class="alarm" id="alarmMark" style="display:none"><div class="atxt">alarm</div><div class="adot"></div></div>
+        <div id="phases"></div>
+      </div>
+    </div>
+    <div class="feedwrap">
+      <div class="feedhead"><h3>Act stream</h3><span class="meta" id="feedMeta"></span></div>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+  <aside>
+    <div class="card">
+      <h3>Audit control</h3>
+      <div class="segrow" id="oversightSeg">
+        <div class="seg off-on" data-ov="0">No oversight</div>
+        <div class="seg on" data-ov="1">Monitor on</div>
+      </div>
+      <div class="bigbudget"><span class="v" id="budgetV">2%</span><span class="u">audit budget</span></div>
+      <input type="range" id="budget" min="0" max="6" step="1" value="3">
+      <div class="ticks"><span>0</span><span>0.5</span><span>1</span><span>2</span><span>5</span><span>10</span><span>20</span></div>
+      <div class="blockline">Monitor blocks <b id="blockPct">74%</b> of attacks<span class="measuredtag" id="measTag">measured at 2%</span></div>
+    </div>
+
+    <div class="card">
+      <h3>This run</h3>
+      <div class="tiles">
+        <div class="tile"><div class="k">Agents attacking</div><div class="val" id="tAgents">0<small> / 1200</small></div></div>
+        <div class="tile"><div class="k">Systems reached</div><div class="val" id="tNodes">0<small> / 12</small></div></div>
+        <div class="tile"><div class="k">Attacks blocked</div><div class="val" id="tBlocked" style="color:var(--teal)">0</div></div>
+        <div class="tile"><div class="k">Got through</div><div class="val" id="tThrough" style="color:var(--red)">0</div></div>
+      </div>
+    </div>
+
+    <div class="card detcard" id="detCard">
+      <h3>Time to detection <span style="color:var(--ext);font-weight:800">(projection)</span></h3>
+      <div id="detBody"></div>
+    </div>
+
+    <div class="card sweep collapsible collapsed" id="sweepCard">
+      <h3 class="ctog"><span class="clabel">Reach vs audit budget <span style="color:var(--ext);font-weight:800">(projection)</span></span><i class="chev"></i></h3>
+      <div class="cardbody">
+        <div id="sweepRows"></div>
+        <div style="font-size:10.5px;color:var(--faint);margin-top:6px;line-height:1.4">Diminishing returns. The correlated residue always lands the first breach, so reach never falls to zero.</div>
+      </div>
+    </div>
+
+    <div class="card mix collapsible collapsed" id="mixCard">
+      <h3 class="ctog"><span class="clabel">Attack-type mix <span style="color:var(--faint);font-weight:700">(overlapping tags)</span></span><i class="chev"></i></h3>
+      <div class="cardbody">
+        <div id="mixRows"></div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <span id="watermark"><b>SIMULATION.</b> Structure documented, dynamics modeled, block rates measured. Not telemetry. All per-act data synthetic.</span>
+  <span>Sources: METR, swarmtraces.org, CSA (see notes/SOURCES.md).</span>
+</footer>
+
+<script src="data/incident.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   HF swarm under oversight. A control-budget wargame.
+   Pure canvas + DOM, vanilla JS, zero external deps.
+   The sim is a deterministic function of (budget, oversight, seed) so
+   the timeline can be scrubbed and the budget compared coherently.
+   ===================================================================== */
+const D = window.INCIDENT;
+const NODES = D.nodes, AGENTS = D.agents, BUDGETS = D.budgets, BLOCKS = D.blocks;
+const RESIDUE = D.residue, PHASES = D.phases, ACT_VERBS = D.act_verbs, SWARM = D.swarm;
+const N = NODES.length;
+const MAXTICK = 100;
+const BOARD = SWARM.board_total, PEAK_RED = SWARM.attacked;
+
+/* ---- helpers ---- */
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+const lerp = (a,b,t)=> a+(b-a)*t;
+function mulberry32(seed){ let a = seed>>>0; return function(){ a|=0; a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+
+/* ---- model ---- */
+function blockRate(bi){ return BLOCKS[bi]; }
+function pHighBlock(bi){ return clamp(blockRate(bi)/(1-RESIDUE),0,1); }
+// documented containment projection: how far the chain gets before the
+// response isolates it, derived from the measured block rate. Monotone with
+// diminishing returns, floored at 2 (the residue always lands the foothold).
+function reachFor(bi){ return Math.max(2, Math.round(N*(1-blockRate(bi)))); }
+// attacking-agent population over the timeline (logistic to PEAK_RED), with a
+// late decline as operators begin locking agents out near disclosure.
+function agentsRed(t){
+  if (t < 12) return Math.round(PEAK_RED/(1+Math.exp(-0.12*(12-40))) * (t/12) * 0.3);
+  let base = PEAK_RED/(1+Math.exp(-0.12*(t-40)));
+  if (t > 92) base *= lerp(1, 0.55, (t-92)/8);
+  return Math.round(clamp(base,0,PEAK_RED));
+}
+function actCount(red,t){ return clamp(1+Math.round(red/120),1,8); }
+function stageOf(idx){ return NODES[clamp(idx,0,N-1)].stage; }
+function dateAt(t){ let d=PHASES[0]; for(const p of PHASES){ if(p.tick<=t) d=p; } return d.date; }
+
+// Detection model (MODELED): a burst of blocked (suspicious) acts of this size is an
+// investigable event. Higher budget audits more of the stream, so the burst and the
+// alarm arrive sooner. Without oversight there is no alarm and detection falls back to
+// the documented late response.
+const ALARM_BLOCKED = 32;
+const DOC_DETECT_TICK = 100; // documented effective response: Jul 13 lockout, after the full chain
+
+// tick -> calendar date, interpolating documented anchors. day index 0 = Jul 13.
+const DATE_ANCHORS = [[0,-37],[6,-17],[16,-5],[24,-4],[30,-3],[36,-2],[44,-2],[62,-1],[92,0],[100,0]];
+function tickToDayIndex(t){ const A=DATE_ANCHORS; t=clamp(t,0,100);
+  for(let i=0;i<A.length-1;i++){ if(t>=A[i][0] && t<=A[i+1][0]){ const span=(A[i+1][0]-A[i][0])||1; return lerp(A[i][1],A[i+1][1],(t-A[i][0])/span); } }
+  return A[A.length-1][1];
+}
+function dateFromTick(t){ const di=Math.round(tickToDayIndex(t));
+  const d=new Date(Date.UTC(2026,6,13)); d.setUTCDate(d.getUTCDate()+di);
+  return d.toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"}); }
+function daysEarlier(detTick){ return Math.max(0, Math.round(tickToDayIndex(DOC_DETECT_TICK)-tickToDayIndex(detTick))); }
+
+function leadsForStage(stage,t){ return AGENTS.filter(a=>a.stage===stage && a.first_tick<=t); }
+
+// Run the whole incident to tick 100 for a (budget, oversight) pair. Returns a
+// per-node fall schedule, the full act log, and cumulative tallies per tick.
+function runSim(bi, oversight, seed){
+  const reach = oversight ? reachFor(bi) : N;
+  const pBlock = oversight ? pHighBlock(bi) : 0;
+  const rng = mulberry32(seed ^ (bi*2654435761) ^ (oversight?0x9e37:0));
+  // schedule node falls for the reachable prefix, paced to documented ticks
+  const nodeFall = new Array(N).fill(null);
+  let prev = 0;
+  for (let i=0;i<N;i++){
+    if (i < reach){ const f = Math.max(NODES[i].tick, prev + 2); nodeFall[i] = f; prev = f; }
+  }
+  const containedAt = reach < N ? reach : -1; // boundary index of the first unreached node
+  // walk ticks, emit acts, accumulate tallies
+  const acts = [];
+  let launched=0, blocked=0, through=0;
+  const snap = []; // per integer tick: {red, fallen, launched, blocked, through}
+  for (let t=0;t<=MAXTICK;t++){
+    const red = agentsRed(t);
+    // frontier = earliest reachable node not yet fallen at t
+    let fi = -1;
+    for (let i=0;i<reach;i++){ if (nodeFall[i] !== null && nodeFall[i] > t){ fi = i; break; } }
+    let targetIdx;
+    if (fi >= 0) targetIdx = fi;
+    else targetIdx = (containedAt >= 0) ? containedAt : (reach-1); // pushing the boundary / last system
+    const atBoundary = (fi < 0 && containedAt >= 0);
+    const stage = stageOf(Math.min(targetIdx, N-1));
+    const A = (t >= 6) ? actCount(red,t) : 0;
+    const leads = leadsForStage(stage, t);
+    for (let k=0;k<A;k++){
+      const hi = rng() > RESIDUE;
+      // monitor blocks high-suspicion acts at the measured rate; the low-suspicion
+      // residue always passes. Containment stops the chain from advancing (nodes
+      // beyond the reach prefix never fall), it does not inflate the block rate.
+      const isBlocked = (oversight && hi && rng() < pBlock);
+      launched++; if (isBlocked) blocked++; else through++;
+      let agent, lead=false;
+      if (leads.length && rng() < 0.5){ agent = leads[(rng()*leads.length)|0].id; lead=true; }
+      else { agent = "agent-" + (((rng()*0xffff)|0).toString(16).padStart(4,"0")); }
+      const verbs = ACT_VERBS[stage] || ["act"];
+      const verb = verbs[(rng()*verbs.length)|0];
+      acts.push({ t, date: dateAt(t), agent, lead, verb,
+        nodeIdx: Math.min(targetIdx,N-1), node: NODES[Math.min(targetIdx,N-1)].label,
+        blocked: isBlocked, boundary: atBoundary });
+    }
+    snap.push({ red, fallen: nodeFall.map(f=>f!==null && f<=t), launched, blocked, through });
+  }
+  // detection: first tick the blocked-activity burst crosses the alarm threshold
+  let detectionTick = null;
+  if (oversight){ for(let t=0;t<=MAXTICK;t++){ if(snap[t].blocked >= ALARM_BLOCKED){ detectionTick=t; break; } } }
+  return { reach, nodeFall, containedAt, acts, snap, detectionTick };
+}
+
+// headline sweep: systems reached per budget (oversight on), computed once
+function computeSweep(){
+  return BUDGETS.map((b,bi)=> ({ budget:b, reach: reachFor(bi) }));
+}
+
+/* ---- state ---- */
+let state = {
+  budgetIndex: 3,
+  oversight: true,
+  seed: 12345,
+  tick: 0,
+  playing: true,
+  speed: 1,
+  endHold: 0,
+  sim: null,
+};
+function rebuild(){ state.sim = runSim(state.budgetIndex, state.oversight, state.seed); projectiles.length=0; lastActPtr=0; state.endHold=0; }
+
+/* ---- canvas / layout ---- */
+const CV = document.getElementById("c");
+const ctx = CV.getContext("2d");
+let W=0, H=0, DPR=1, LAY=null;
+let swarmOrder = []; // shuffled 0..BOARD-1 for the field
+
+function buildSwarmOrder(){
+  const n = Math.min(BOARD, 1200);
+  swarmOrder = Array.from({length:n}, (_,i)=>i);
+  const rng = mulberry32(99);
+  for (let i=n-1;i>0;i--){ const j=(rng()*(i+1))|0; const tmp=swarmOrder[i]; swarmOrder[i]=swarmOrder[j]; swarmOrder[j]=tmp; }
+}
+buildSwarmOrder();
+
+function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+let COL = {};
+function readColors(){
+  COL = { bg:css("--bg"), panel:css("--panel"), panel2:css("--panel2"), line:css("--line"), line2:css("--line2"),
+    text:css("--text"), dim:css("--dim"), faint:css("--faint"), blue:css("--blue"), red:css("--red"),
+    teal:css("--teal"), amber:css("--amber"), green:css("--green"), openai:css("--openai"), hf:css("--hf"), ext:css("--ext") };
+}
+
+function layout(){
+  const stage = CV.parentElement.getBoundingClientRect();
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  W = Math.max(640, stage.width|0); H = Math.max(440, stage.height|0);
+  CV.width = W*DPR; CV.height = H*DPR; CV.style.width=W+"px"; CV.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
+  const padL=18, padT=46, padB=16;
+  // infra is a narrow column on the right (cards about half their old width)
+  const infraCardW = clamp(Math.round(W*0.27), 300, 430);
+  const infra = { x: W - padL - infraCardW - 16, y: padT, w: infraCardW + 16, h: H-padT-padB };
+  // audit lane sits just left of the infra column
+  const auditX = infra.x - 46;
+  // swarm fills the rest of the width on the left: wider and (via the shorter stage) less tall
+  const swarm = { x: padL, y: padT, w: auditX - 40 - padL, h: H-padT-padB, label:"Agent swarm" };
+
+  // node cards grouped by owner, stacked vertically with a spine
+  const groups = [
+    { own:"openai", label:"OpenAI eval infrastructure", color:COL.openai },
+    { own:"ext-pivot", label:"Customer sandbox (pivot)", color:COL.ext },
+    { own:"hf", label:"Hugging Face infrastructure", color:COL.hf },
+    { own:"ext", label:"External / public", color:COL.ext },
+  ];
+  // assign each node to a group bucket
+  function bucket(n,i){ if(n.own==="openai") return 0; if(n.id==="modal_sandbox") return 1; if(n.own==="hf") return 2; return 3; }
+  const order = NODES.map((n,i)=>({n,i,g:bucket(n,i)}));
+  const nNodes = order.length;
+  const headH = 15, cardGap = 5, groupGap = 7;
+  const nGroups = groups.length;
+  const avail = infra.h - nGroups*(headH) - (nGroups-1)*groupGap;
+  const cardH = clamp(Math.floor(avail / nNodes) - cardGap, 22, 46);
+  let y = infra.y;
+  const cards = [];
+  const groupBoxes = [];
+  for (let g=0; g<nGroups; g++){
+    const items = order.filter(o=>o.g===g);
+    const gy0 = y;
+    y += headH;
+    for (const it of items){
+      cards.push({ idx: it.i, x: infra.x+14, y, w: infra.w-16, h: cardH, g });
+      y += cardH + cardGap;
+    }
+    groupBoxes.push({ g, label:groups[g].label, color:groups[g].color, y0:gy0, y1:y-cardGap, x:infra.x });
+    y += groupGap;
+  }
+  LAY = { swarm, auditX, infra, cards, groups, groupBoxes, cardH };
+}
+
+/* ---- projectiles (visual flourish derived from the act log) ---- */
+let projectiles = [];
+let lastActPtr = 0;
+function spawnProjectilesUpTo(tick){
+  if (!state.sim) return;
+  const acts = state.sim.acts;
+  let budget = 7; // cap spawns per frame
+  while (lastActPtr < acts.length && acts[lastActPtr].t <= tick && budget-- > 0){
+    const a = acts[lastActPtr++];
+    const card = LAY.cards.find(c=>c.idx===a.nodeIdx);
+    if (!card) continue;
+    const sw = LAY.swarm;
+    const sx = sw.x + 10 + Math.random()*(sw.w-20);
+    const sy = sw.y + 10 + Math.random()*(sw.h-20);
+    const tx = card.x, ty = card.y + card.h/2;
+    const gateT = clamp((LAY.auditX - sx)/(tx - sx), 0.05, 0.95);
+    projectiles.push({ sx,sy,tx,ty,gateT, blocked:a.blocked, t:0, spd:1/(0.55+Math.random()*0.4) });
+  }
+  if (projectiles.length > 90) projectiles.splice(0, projectiles.length-90);
+}
+
+/* ---- rendering ---- */
+function rr(x,y,w,h,r){ r=Math.min(r,w/2,h/2); ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function draw(){
+  const t = state.tick;
+  const snap = state.sim.snap[Math.round(clamp(t,0,MAXTICK))];
+  ctx.clearRect(0,0,W,H);
+
+  // ---- swarm field ----
+  const sw = LAY.swarm;
+  ctx.fillStyle = COL.panel2; rr(sw.x,sw.y,sw.w,sw.h,12); ctx.fill();
+  ctx.strokeStyle = COL.line; ctx.lineWidth=1; ctx.stroke();
+  // grid of agents (columns scale with the box aspect so the field stays dense)
+  const gx = sw.x+10, gy = sw.y+26, gw = sw.w-20, gh = sw.h-52;
+  const cols = clamp(Math.round(Math.sqrt(swarmOrder.length * gw/gh)), 24, 66);
+  const rows = Math.ceil(swarmOrder.length/cols);
+  const cw = gw/cols, chh = gh/rows;
+  const cell = Math.min(cw,chh)*0.78;
+  const redCount = Math.min(swarmOrder.length, Math.round(snap.red * swarmOrder.length / BOARD));
+  const redSet = new Set();
+  for (let i=0;i<redCount;i++) redSet.add(swarmOrder[i]);
+  for (let i=0;i<swarmOrder.length;i++){
+    const r = (i/cols)|0, c = i%cols;
+    const x = gx + c*cw + (cw-cell)/2, y = gy + r*chh + (chh-cell)/2;
+    ctx.fillStyle = redSet.has(i) ? COL.red : COL.blue;
+    ctx.globalAlpha = redSet.has(i) ? 0.95 : 0.5;
+    rr(x,y,cell,cell,Math.max(1,cell*0.22)); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle = COL.dim; ctx.font = "800 12px system-ui,Arial"; ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+  ctx.fillText("AGENT SWARM", sw.x+10, sw.y+16);
+  ctx.fillStyle = COL.faint; ctx.font="700 11px system-ui,Arial"; ctx.textAlign="right";
+  ctx.fillText(snap.red.toLocaleString()+" attacking / "+BOARD.toLocaleString(), sw.x+sw.w-10, sw.y+16);
+  // legend
+  const ly = sw.y+sw.h-10; ctx.textAlign="left"; ctx.font="700 10.5px system-ui,Arial";
+  ctx.fillStyle=COL.blue; rr(sw.x+12, ly-8, 8,8,2); ctx.fill();
+  ctx.fillStyle=COL.faint; ctx.fillText("idle agent", sw.x+24, ly);
+  ctx.fillStyle=COL.red; rr(sw.x+92, ly-8, 8,8,2); ctx.fill();
+  ctx.fillStyle=COL.faint; ctx.fillText("attacking", sw.x+104, ly);
+
+  // ---- audit lane ----
+  const ax = LAY.auditX;
+  const on = state.oversight ? blockRate(state.budgetIndex) : 0;
+  ctx.save();
+  ctx.strokeStyle = state.oversight ? COL.teal : COL.line;
+  ctx.globalAlpha = state.oversight ? (0.35+0.55*on) : 0.5;
+  ctx.lineWidth = 3; ctx.setLineDash([6,7]);
+  ctx.beginPath(); ctx.moveTo(ax, sw.y); ctx.lineTo(ax, sw.y+sw.h); ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha=1;
+  ctx.translate(ax-12, sw.y+sw.h/2); ctx.rotate(-Math.PI/2);
+  ctx.fillStyle = state.oversight ? COL.teal : COL.faint; ctx.font="800 12px system-ui,Arial";
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(state.oversight ? "AUDIT  "+fmtBudget(BUDGETS[state.budgetIndex]) : "NO OVERSIGHT", 0, 0);
+  ctx.restore();
+
+  // ---- infra groups + cards ----
+  for (const gb of LAY.groupBoxes){
+    ctx.fillStyle = gb.color; ctx.font="800 11px system-ui,Arial"; ctx.textAlign="left"; ctx.textBaseline="alphabetic";
+    ctx.globalAlpha=0.9; ctx.fillText(gb.label.toUpperCase(), gb.x+14, gb.y0+13); ctx.globalAlpha=1;
+  }
+  // spine connecting consecutive nodes
+  ctx.strokeStyle = COL.line; ctx.lineWidth=2; ctx.beginPath();
+  for (let i=0;i<LAY.cards.length;i++){
+    const c = LAY.cards[i]; const px = c.x-8, py=c.y+c.h/2;
+    if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+
+  const containedAt = state.sim.containedAt;
+  for (const c of LAY.cards){
+    const n = NODES[c.idx]; const fallen = snap.fallen[c.idx];
+    const unreached = (containedAt>=0 && c.idx>=containedAt);
+    ctx.globalAlpha = unreached ? 0.42 : 1;
+    ctx.fillStyle = fallen ? color_mix(COL.red,COL.panel,0.78) : COL.panel2;
+    rr(c.x,c.y,c.w,c.h,8); ctx.fill();
+    ctx.lineWidth = fallen?2:1.2; ctx.strokeStyle = fallen ? COL.red : (ownColor(n)); ctx.stroke();
+    // accent dot
+    ctx.fillStyle = fallen ? COL.red : ownColor(n);
+    rr(c.x+9, c.y+c.h/2-7, 5, 14, 2.5); ctx.fill();
+    // label
+    ctx.fillStyle = fallen ? COL.red : COL.text; ctx.font="750 13px system-ui,Arial"; ctx.textAlign="left"; ctx.textBaseline="middle";
+    ctx.fillText(n.label, c.x+24, c.y+c.h/2 - (c.h>40?7:0));
+    if (c.h>40){ ctx.fillStyle = COL.faint; ctx.font="600 10.5px system-ui,Arial";
+      ctx.fillText(n.date+"  .  "+n.stage, c.x+24, c.y+c.h/2+9); }
+    // status
+    ctx.textAlign="right"; ctx.font="800 10px system-ui,Arial";
+    ctx.fillStyle = fallen?COL.red:(unreached?COL.faint:COL.dim);
+    ctx.fillText(fallen?"COMPROMISED":(unreached?"contained":"at risk"), c.x+c.w-12, c.y+c.h/2);
+    ctx.globalAlpha=1;
+  }
+  // containment barrier (label right-aligned so it clears the group header on the left)
+  if (containedAt>=0){
+    const cc = LAY.cards.find(c=>c.idx===containedAt);
+    if (cc){ ctx.strokeStyle=COL.teal; ctx.lineWidth=2; ctx.setLineDash([7,5]);
+      ctx.beginPath(); ctx.moveTo(cc.x-12, cc.y-4); ctx.lineTo(cc.x+cc.w, cc.y-4); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=COL.teal; ctx.font="800 9px system-ui,Arial"; ctx.textAlign="right"; ctx.textBaseline="bottom";
+      ctx.fillText("CONTAINED", cc.x+cc.w, cc.y-6);
+    }
+  }
+
+  // honesty caption framing each view (counterfactual vs documented), top-left of the stage
+  ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.font="700 11.5px system-ui,Arial";
+  ctx.fillStyle = COL.faint;
+  const cap = state.oversight
+    ? "PROJECTION: how far the swarm reaches at a "+fmtBudget(BUDGETS[state.budgetIndex])+" audit budget before the monitor contains it."
+    : "NO OVERSIGHT: the documented kill chain runs to completion.";
+  ctx.fillText(cap, LAY.swarm.x, LAY.swarm.y-16);
+
+  // alarm banner: once the blocked-activity burst trips an investigation (projection)
+  const det = state.sim.detectionTick;
+  if (state.oversight && det !== null && t >= det){
+    ctx.textAlign="left"; ctx.textBaseline="middle"; ctx.font="800 12px system-ui,Arial";
+    const label = "ALARM: investigation triggered "+dateFromTick(det);
+    let bw = Math.min(ctx.measureText(label).width + 34, LAY.swarm.w*0.62);
+    const bx = LAY.swarm.x + LAY.swarm.w - bw, by = LAY.swarm.y - 16;
+    ctx.fillStyle = COL.bg; ctx.globalAlpha = 0.86; rr(bx, by-14, bw, 28, 14); ctx.fill(); ctx.globalAlpha=1;
+    ctx.fillStyle = COL.amber; ctx.globalAlpha = 0.16; rr(bx, by-14, bw, 28, 14); ctx.fill(); ctx.globalAlpha=1;
+    ctx.strokeStyle = COL.amber; ctx.lineWidth=1.5; rr(bx, by-14, bw, 28, 14); ctx.stroke();
+    ctx.fillStyle = COL.amber; ctx.beginPath(); ctx.arc(bx+16, by, 3.4, 0, 7); ctx.fill();
+    ctx.fillText(label, bx+26, by+1);
+  }
+
+  // ---- projectiles ----
+  for (const p of projectiles){
+    p.t += p.spd * 0.016 * (state.playing?1:0.0001);
+  }
+  projectiles = projectiles.filter(p=>p.t < 1.25);
+  for (const p of projectiles){
+    if (p.blocked && p.t >= p.gateT){
+      const x = lerp(p.sx,p.tx,p.gateT), y = lerp(p.sy,p.ty,p.gateT);
+      const a = clamp(1-(p.t-p.gateT)/0.3,0,1);
+      ctx.globalAlpha=a; ctx.strokeStyle=COL.teal; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.arc(x,y, 4+(p.t-p.gateT)*60, 0, 7); ctx.stroke(); ctx.globalAlpha=1;
+      continue;
+    }
+    const tt = Math.min(p.t, 1);
+    const x0 = lerp(p.sx,p.tx,Math.max(0,tt-0.05)), y0=lerp(p.sy,p.ty,Math.max(0,tt-0.05));
+    const x1 = lerp(p.sx,p.tx,tt), y1=lerp(p.sy,p.ty,tt);
+    ctx.strokeStyle = COL.red; ctx.globalAlpha = 0.85; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+}
+
+function ownColor(n){ if(n.own==="openai") return COL.openai; if(n.id==="modal_sandbox") return COL.ext; if(n.own==="hf") return COL.hf; return COL.ext; }
+function fmtBudget(b){ return (b===0.5?"0.5":String(b))+"%"; }
+// simple hex color mix
+function color_mix(a,b,t){
+  function h2(c){ c=c.replace('#',''); if(c.length===3) c=c.split('').map(x=>x+x).join(''); return [parseInt(c.slice(0,2),16),parseInt(c.slice(2,4),16),parseInt(c.slice(4,6),16)]; }
+  if(a[0]!=='#'||b[0]!=='#') return a;
+  const A=h2(a),B=h2(b); const m=A.map((v,i)=>Math.round(lerp(v,B[i],t)));
+  return "rgb("+m[0]+","+m[1]+","+m[2]+")";
+}
+
+/* ---- DOM sync ---- */
+const $ = id=>document.getElementById(id);
+let domTick = -1;
+function syncDOM(){
+  const t = Math.round(clamp(state.tick,0,MAXTICK));
+  $("clock").innerHTML = "<span>tick</span> "+t+" <span>/</span> 100  <span>&middot;</span> "+dateAt(t);
+  const snap = state.sim.snap[t];
+  const nodesReached = snap.fallen.filter(Boolean).length;
+  $("tAgents").innerHTML = snap.red.toLocaleString()+"<small> / "+BOARD.toLocaleString()+"</small>";
+  $("tNodes").innerHTML = nodesReached+"<small> / "+N+"</small>";
+  $("tBlocked").textContent = snap.blocked.toLocaleString();
+  $("tThrough").textContent = snap.through.toLocaleString();
+  // timeline
+  $("trackFill").style.width = (t/MAXTICK*100)+"%";
+  $("trackHandle").style.left = (t/MAXTICK*100)+"%";
+  document.querySelectorAll(".phase").forEach(el=>{ const pt=+el.dataset.tick; el.classList.toggle("done", pt<=t); });
+  // feed
+  renderFeed(t);
+}
+function renderFeed(t){
+  const acts = state.sim.acts;
+  // find acts with tick<=t, take last ~9
+  let end = acts.length; // acts are tick-ordered
+  // binary-ish scan from a cached pointer is overkill; linear find of last index <= t
+  let hi = 0; for (let i=acts.length-1;i>=0;i--){ if (acts[i].t<=t){ hi=i; break; } }
+  const list = [];
+  for (let i=hi;i>=0 && list.length<9;i--) list.push(acts[i]);
+  const feed = $("feed");
+  feed.innerHTML = list.map(a=>{
+    const vd = a.blocked ? '<div class="vd blocked">blocked</div>' : '<div class="vd through">through</div>';
+    return '<div class="act"><div class="dt">'+a.date+'</div><div class="ag'+(a.lead?' lead':'')+'">'+a.agent+'</div>'+
+      '<div class="vb">'+a.verb+'</div><div class="nd">'+a.node+'</div>'+vd+'</div>';
+  }).join("");
+  const snap = state.sim.snap[t];
+  const rate = snap.launched>0 ? Math.round(snap.blocked/snap.launched*100) : 0;
+  $("feedMeta").textContent = snap.launched.toLocaleString()+" acts so far  .  "+snap.blocked.toLocaleString()+" blocked ("+rate+"%)  .  "+snap.through.toLocaleString()+" through";
+}
+
+function renderSweep(){
+  const sweep = computeSweep();
+  const maxReach = N;
+  $("sweepRows").innerHTML = sweep.map((s,bi)=>{
+    const hl = (bi===state.budgetIndex && state.oversight);
+    const pct = Math.round(s.reach/maxReach*100);
+    return '<div class="row'+(hl?' hl':'')+'"><div class="lab">'+fmtBudget(s.budget)+'</div>'+
+      '<div class="bar'+(hl?' hl':'')+'"><i style="width:'+pct+'%"></i></div><div class="n">'+s.reach+'</div></div>';
+  }).join("");
+}
+function renderDetection(){
+  const det = state.sim.detectionTick;
+  const body = $("detBody"), card = $("detCard"), mark = $("alarmMark");
+  if (!state.oversight){
+    card.classList.remove("on");
+    body.innerHTML = '<div class="detline"><b>No monitor, no alarm.</b></div>'+
+      '<div class="detline">The swarm ran undetected until the documented response on Jul 13, after it reached private data. Public disclosure followed on Jul 16.</div>';
+    mark.style.display = "none"; return;
+  }
+  if (det === null){
+    card.classList.remove("on");
+    body.innerHTML = '<div class="detline">At this budget the blocked activity never forms a burst large enough to alarm inside the window.</div>';
+    mark.style.display = "none"; return;
+  }
+  card.classList.add("on");
+  const d = dateFromTick(det), saved = daysEarlier(det);
+  body.innerHTML =
+    '<div class="detbig"><span class="dv">'+d+'</span><span class="du">estimated detection</span></div>'+
+    '<div class="detline">An investigation fires on a burst of ~'+ALARM_BLOCKED+' blocked acts, well before the chain completes.</div>'+
+    '<div class="detsave">~'+saved+' day'+(saved===1?'':'s')+' before the documented response</div>';
+  mark.style.left = (det/MAXTICK*100)+"%"; mark.style.display = "block";
+}
+function renderMix(){
+  const cats = D.categories; const max = Math.max(...cats.map(c=>c.pct));
+  $("mixRows").innerHTML = cats.map(c=>{
+    return '<div class="m"><span>'+c.name+'</span><span>'+c.pct+'%</span></div>'+
+      '<div class="mbar"><i style="width:'+(c.pct/max*100)+'%"></i></div>';
+  }).join("");
+}
+function renderPhases(){
+  const host = $("phases");
+  host.innerHTML = PHASES.map((p,i)=>{
+    const left = (p.tick/MAXTICK*100);
+    const low = (i % 2 === 1) ? " low" : "";
+    return '<div class="phase'+low+'" data-tick="'+p.tick+'" style="left:'+left+'%"><div class="dot"></div>'+
+      '<div class="ptxt"><div class="dt">'+p.date+'</div><div class="lb">'+p.label+'</div></div></div>';
+  }).join("");
+}
+
+/* ---- loop ---- */
+let last = performance.now();
+const TICKS_PER_SEC = 12;
+function frame(now){
+  const dt = Math.min(0.05,(now-last)/1000); last = now;
+  if (state.playing){
+    if (state.endHold > 0){
+      // hold on the finished frame for about a second before looping
+      state.endHold -= dt;
+      if (state.endHold <= 0){ state.endHold = 0; state.tick = 0; projectiles.length = 0; lastActPtr = 0; }
+    } else {
+      state.tick += dt * TICKS_PER_SEC * state.speed;
+      if (state.tick >= MAXTICK){ state.tick = MAXTICK; state.endHold = 1.1; }
+      spawnProjectilesUpTo(state.tick);
+    }
+  }
+  draw();
+  syncDOM();
+  requestAnimationFrame(frame);
+}
+
+/* ---- controls ---- */
+function setBudget(i){ state.budgetIndex=clamp(i,0,BUDGETS.length-1);
+  $("budget").value=state.budgetIndex;
+  $("budgetV").textContent=fmtBudget(BUDGETS[state.budgetIndex]);
+  $("blockPct").textContent=Math.round(blockRate(state.budgetIndex)*100)+"%";
+  $("measTag").style.display = (state.budgetIndex===3)?"inline-block":"none";
+  rebuild(); renderSweep(); renderDetection();
+}
+function setOversight(on){ state.oversight=on;
+  document.querySelectorAll("#oversightSeg .seg").forEach(s=>{ const v=+s.dataset.ov===1;
+    s.classList.toggle("on", v && on); s.classList.toggle("off-on", !v && !on);
+    s.style.opacity = ((v&&on)||(!v&&!on))?1:0.55; });
+  $("budget").disabled = !on;
+  rebuild(); renderSweep(); renderDetection();
+}
+function seekFromClientX(clientX){ const r=$("track").getBoundingClientRect();
+  const f=clamp((clientX-r.left)/r.width,0,1); state.tick=f*MAXTICK;
+  projectiles.length=0; lastActPtr=0; state.endHold=0; spawnProjectilesUpTo(state.tick); }
+
+$("play").addEventListener("click", ()=>{ state.playing=!state.playing; $("play").textContent=state.playing?"Pause":"Play"; $("play").classList.toggle("primary", state.playing); });
+$("restart").addEventListener("click", ()=>{ state.tick=0; projectiles.length=0; lastActPtr=0; state.endHold=0; });
+$("speed").addEventListener("change", e=>{ state.speed=+e.target.value; });
+$("budget").addEventListener("input", e=>setBudget(+e.target.value));
+document.querySelectorAll("#oversightSeg .seg").forEach(s=> s.addEventListener("click", ()=> setOversight(+s.dataset.ov===1)));
+document.querySelectorAll(".collapsible h3.ctog").forEach(h=> h.addEventListener("click", ()=> h.closest(".card").classList.toggle("collapsed")));
+let dragging=false;
+$("track").addEventListener("pointerdown", e=>{ dragging=true; $("track").setPointerCapture(e.pointerId); seekFromClientX(e.clientX); });
+$("track").addEventListener("pointermove", e=>{ if(dragging) seekFromClientX(e.clientX); });
+$("track").addEventListener("pointerup", ()=>{ dragging=false; });
+$("theme").addEventListener("click", ()=>{ const cur=document.documentElement.getAttribute("data-theme");
+  const next = cur==="light"?"dark":(cur==="dark"?"light":( matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark"));
+  document.documentElement.setAttribute("data-theme", next); readColors(); });
+// hover tooltips on infra nodes: surface the documented technique, source and CVE
+function nodeAt(mx,my){ if(!LAY) return null; for(const c of LAY.cards){ if(mx>=c.x && mx<=c.x+c.w && my>=c.y && my<=c.y+c.h) return c; } return null; }
+CV.addEventListener("pointermove", e=>{
+  const r=CV.getBoundingClientRect(); const sx=W/r.width, sy=H/r.height;
+  const mx=(e.clientX-r.left)*sx, my=(e.clientY-r.top)*sy;
+  const c=nodeAt(mx,my); const tip=$("tip");
+  if(c){ const n=NODES[c.idx];
+    tip.innerHTML='<div class="tt">'+n.label+'</div><div class="ts">'+n.date+' &middot; '+n.stage+'</div>'+
+      '<div class="tb">'+n.technique+'</div>'+(n.cve?'<div class="tb tcve">'+n.cve+'</div>':'')+
+      '<div class="tsrc">documented &middot; source: '+n.source+'</div>';
+    tip.style.display="block";
+    tip.style.left=Math.min(e.clientX+14, window.innerWidth-344)+"px";
+    tip.style.top=Math.min(e.clientY+14, window.innerHeight-130)+"px";
+    CV.style.cursor="pointer";
+  } else { tip.style.display="none"; CV.style.cursor="default"; }
+});
+CV.addEventListener("pointerleave", ()=>{ $("tip").style.display="none"; CV.style.cursor="default"; });
+window.addEventListener("keydown", e=>{ if(e.key===" "){ e.preventDefault(); $("play").click(); }
+  if(e.key==="ArrowLeft") setBudget(state.budgetIndex-1); if(e.key==="ArrowRight") setBudget(state.budgetIndex+1); });
+window.addEventListener("resize", ()=>{ readColors(); layout(); });
+// keep canvas colors in sync whenever the theme attribute changes (toggle or external)
+new MutationObserver(()=>{ readColors(); layout(); }).observe(document.documentElement, {attributes:true, attributeFilter:["data-theme"]});
+
+/* ---- init ---- */
+$("title").textContent = D.meta.title;
+$("subtitle").textContent = D.meta.subtitle;
+readColors(); rebuild(); layout();
+renderSweep(); renderMix(); renderPhases();
+setBudget(3); setOversight(true);
+// test/debug hook (harmless): lets a headless renderer drive exact state
+window.__sim = {
+  get state(){ return state; },
+  setBudget, setOversight,
+  seek(t){ state.tick=clamp(t,0,MAXTICK); projectiles.length=0; lastActPtr=0; state.endHold=0; spawnProjectilesUpTo(state.tick); draw(); syncDOM(); },
+  pause(){ state.playing=false; $("play").textContent="Play"; },
+  cardPoint(idx){ const c=LAY.cards.find(c=>c.idx===idx); if(!c) return null;
+    const r=CV.getBoundingClientRect(); const sx=r.width/W, sy=r.height/H;
+    return { x: r.left+(c.x+c.w/2)*sx, y: r.top+(c.y+c.h/2)*sy }; },
+  ready: true
+};
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

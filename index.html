@@ -131,8 +131,9 @@
 
   /* ---- timeline ---- */
   .timeline { padding: 2px 4px 0; }
-  .trackwrap { position: relative; height: 70px; padding: 0 104px; }
-  .track { position: absolute; left: 104px; right: 104px; top: 20px; height: 6px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
+  .trackwrap { position: relative; height: 70px; }
+  .markers { position: absolute; left: 130px; right: 130px; top: 0; bottom: 0; }
+  .track { position: absolute; left: 130px; right: 130px; top: 20px; height: 6px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
   .track .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--blue); }
   .track .handle { position: absolute; top: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); border: 3px solid var(--blue); transform: translateX(-50%); box-shadow: var(--shadow); }
   .phase { position: absolute; top: 14px; transform: translateX(-50%); text-align: center; pointer-events: none; }
@@ -233,8 +234,10 @@
     <div class="timeline">
       <div class="trackwrap">
         <div class="track" id="track"><div class="fill" id="trackFill"></div><div class="handle" id="trackHandle"></div></div>
-        <div class="alarm" id="alarmMark" style="display:none"><div class="atxt">alarm</div><div class="adot"></div></div>
-        <div id="phases"></div>
+        <div class="markers" id="markers">
+          <div class="alarm" id="alarmMark" style="display:none"><div class="atxt">alarm</div><div class="adot"></div></div>
+          <div id="phases"></div>
+        </div>
       </div>
     </div>
     <div class="feedwrap">

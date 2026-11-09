@@ -1,0 +1,13 @@
+metric,value
+records,189579
+trees,128454
+singletons,102206
+median_size,1.0
+mean_size,1.476
+max_size,859
+median_depth,1.0
+mean_depth,1.204
+max_depth,2
+records_with_parent,61125
+records_with_timestamp,0
+records_with_tags,37

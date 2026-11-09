@@ -1,0 +1,5 @@
+condition,caught,n,recall_pct
+comments_visible,468,500,93.6
+comments_removed,425,500,85.0
+discordant_only_with_comments,44,500,
+discordant_only_without_comments,1,500,

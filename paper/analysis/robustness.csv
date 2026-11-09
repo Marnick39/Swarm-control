@@ -1,0 +1,16 @@
+pool,k,measured_miss,independence_mean,independence_per_panel
+"primary (all comment-blind, 1 per family)",1,0.556429,0.556429,0.556429
+"primary (all comment-blind, 1 per family)",2,0.371187,0.309613,0.303600
+"primary (all comment-blind, 1 per family)",3,0.278038,0.172277,0.162216
+"primary (all comment-blind, 1 per family)",4,0.222747,0.095860,0.084746
+"primary (all comment-blind, 1 per family)",5,0.186077,0.053339,0.043213
+"primary (all comment-blind, 1 per family)",7,0.132000,0.016515,0.006672
+"primary (all comment-blind, 1 per family)",10,0.106160,0.002845,0.000950
+"primary (all comment-blind, 1 per family)",14,0.086000,0.000273,0.000020
+matched strictness (achieved FPR 1.6 to 2.0),1,0.469556,0.469556,0.469556
+matched strictness (achieved FPR 1.6 to 2.0),2,0.276556,0.220482,0.210163
+matched strictness (achieved FPR 1.6 to 2.0),3,0.194143,0.103529,0.089261
+matched strictness (achieved FPR 1.6 to 2.0),4,0.151825,0.048612,0.035805
+matched strictness (achieved FPR 1.6 to 2.0),5,0.126603,0.022826,0.013497
+matched strictness (achieved FPR 1.6 to 2.0),7,0.099000,0.005033,0.001555
+matched strictness (achieved FPR 1.6 to 2.0),9,0.086000,0.001110,0.000130

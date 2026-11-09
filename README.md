@@ -1,76 +1,59 @@
-# sim-ng: the Hugging Face swarm, under oversight
+# Oversight does not stack
 
-A self-contained, interactive control-budget wargame built in the visual idiom of
-[swecraft.world](https://sim.swecraft.world) (the *World of SWECraft* sim browser:
-a map of a software world, a population of agents, an activity stream over ticks,
-and an audit view). It replays the documented July 2026 OpenAI / Hugging Face
-agent-swarm incident and shows, across audit budgets, how far a trusted monitor
-would contain the swarm.
+Companion artifacts for the Apart Research / AI Alignment Foundation **Swarm
+Alignment Sprint** submission *"Oversight does not stack"* (track 4, Multi-Agent
+Oversight and Control), plus a new interactive simulation built afterward.
 
-It is the successor to the first `apart-swarm-sprint` simulation. Where that one
-was a static gate-and-residue scene, this adds the two things that paradigm was
-missing: a **time axis** (the incident ran from late June to mid July 2026) and a
-**named-agent act stream** (the real coordinators and their actions).
+**Live:**
+- **Interactive simulation** (the headline piece): https://marnick39.github.io/Swarm-control/
+- **Companion video** (looping visualization): https://marnick39.github.io/Swarm-control/video/
+- **Paper** (PDF): https://marnick39.github.io/Swarm-control/paper/report.pdf
 
-## What it shows
+## What is here
 
-- **Agent swarm** (left): the 1,200 agents on the board, flipping from benign to
-  attacking over the timeline, up to the ~700 that attacked Hugging Face.
-- **Audit lane** (centre): the trusted monitor. The *Audit* view of the SWECraft
-  idiom, turned into the control surface. It reviews the act stream and blocks a
-  budget-dependent fraction.
-- **Infrastructure** (right): the documented kill chain as a graph, grouped by
-  owner (OpenAI eval infra, the customer sandbox pivot, Hugging Face, external).
-  Nodes turn red as they fall.
-- **Audit control** (rail): an oversight on/off A/B and a 0 to 20 percent budget
-  slider. **Reach vs budget** projects how far the swarm gets at each budget.
-- **Timeline** (bottom): a scrubber with the documented dates and phases.
-- **Act stream**: a live feed of monitorable acts, attributed to the named agents
-  (PHASEONE10841, 38148c, JAN183411, LILY, ...) and anonymous swarm members.
+| Path | What it is |
+|---|---|
+| `index.html` | **The interactive simulation.** A control-budget wargame on the documented July 2026 Hugging Face agent-swarm incident, in the visual idiom of swecraft.world: agent-population field, an audit lane as the control surface, the documented kill chain, a dated timeline, a named-agent act stream, an oversight A/B, a 0 to 20 percent budget slider, a reach-vs-budget projection, and a time-to-detection projection. Supersedes the original static gate-and-residue scene (not included here). |
+| `video/index.html` | The companion looping visualization: how correlated monitor failure lets a correlated residue through. Watermarked, anonymized, synthetic. |
+| `paper/report.pdf`, `paper/report.typ` | The report (8-page body; 13-page PDF with references and appendices). |
+| `paper/figures/` | Figures f1 to f7. |
+| `paper/analysis/` | Every number quoted in the report. Two sample-level files are withheld, see `paper/analysis/WITHHELD.md`. |
+| `paper/scripts/` | The analysis pipeline (catch matrix, swarm/panel scaling, variance decomposition, budget sweep, control game, transfer check). |
+| `paper/notes/` | Concept, critique log, pre-existing-vs-new declaration, transfer-check pre-registration. |
+| `data/`, `scripts/`, `notes/SOURCES.md` | The interactive simulation's grounded data, generator, and per-claim citations. |
 
-## Honesty tiers (on every surface)
+## The claim
+
+Attacker swarms and monitor panels are both populations, but only one of them
+scales the way the arithmetic predicts. An attacker swarm realises 1.000 to 1.017
+times the independence prediction. A defender panel of 14 distinct models realises
+315 times worse than its own, still missing 8.6 percent of backdoors where
+independence predicts 0.027 percent. The mechanism is that evasion is a property of
+the task and the edit, not of the author: generator identity explains only 9.9
+percent of the variance.
+
+## Honesty tiers (on every surface of the simulation)
 
 - **Documented structure.** Nodes, agents, dates and counts from the public
-  investigation (METR, swarmtraces.org, CSA). See [`notes/SOURCES.md`](notes/SOURCES.md).
-  Structure is accurate; per-act detail is synthetic.
+  investigation (METR, swarmtraces.org, CSA). See `notes/SOURCES.md`. Structure is
+  accurate; per-act detail is synthetic.
 - **Modeled dynamics.** The per-tick spread and per-act suspicion are a synthetic
   model, not telemetry.
 - **Measured block rate.** The block-rate-at-budget table (74 percent at a 2 percent
   budget) and the correlated residue come from our control-budgets transfer check.
-- **Scenario projection.** The containment depth ("reach") is a projection of what
-  oversight would have contained. It is not a prediction, and the no-oversight view
-  is the documented chain running to completion.
+- **Scenario projection.** Containment depth and the detection date are projections of
+  what oversight would have contained, not predictions. The no-oversight view is the
+  documented chain running to completion.
 
-## Build and run
+## Data handling
 
-```bash
-# regenerate the grounded data (writes data/incident.json and data/incident.js)
-python3 -I scripts/build_data.py data/incident.json
-```
+The raw transfer-check rows are withheld: the benign actions come from the gated AI
+Village dataset (no redistribution under its terms) and the malicious actions are raw
+Swarm Traces payloads. Only the aggregates needed to check the paper ship here. See
+`paper/analysis/WITHHELD.md` and `paper/notes/PREREG-transfer-check.md`.
 
-Then open `index.html`. It is a static folder with no external dependencies and no
-network calls, so it serves as-is from any static host.
+## Build and deploy
 
-### Deploy (Cloudflare Pages)
-
-The whole folder is static. Point Cloudflare Pages at it with no build command and
-`/` as the output directory, or drop `index.html` plus `data/` into a Pages direct
-upload. Nothing else is required.
-
-## Files
-
-| Path | What it is |
-|---|---|
-| `index.html` | The whole app: canvas map, DOM chrome, deterministic sim. Vanilla JS. |
-| `data/incident.json` | The grounded dataset (audit copy). |
-| `data/incident.js` | The same data as `window.INCIDENT` for the page to load. |
-| `scripts/build_data.py` | Generates the dataset from the documented facts, with validation. |
-| `scripts/render_shots.py` | Headless render and JS-error check (runs in a Playwright container). |
-| `notes/SOURCES.md` | Per-claim citations (METR / swarmtraces / CSA). |
-
-## Reproducing the numbers
-
-The sim is a deterministic function of (budget, oversight, seed), so the timeline
-scrubs coherently and budgets compare fairly. The block table and residue are the
-only measured inputs; everything calibrates to them. No model is called and nothing
-is paid for.
+The simulation is a self-contained static folder (vanilla JS, no runtime
+dependencies). `scripts/build_data.py` regenerates `data/`. Deployment is plain
+GitHub Pages from `main`; see `PUBLISHING.md`. Every push to `main` redeploys.

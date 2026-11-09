@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Correlated Monitor Failure - Calibrated Illustration</title>
+<style>
+  :root{
+    --bg:#0b0f14;
+    --panel:#121823;
+    --ink:#e8edf4;
+    --ink2:#9aa7bd;
+    --benign:#8a94a6;
+    --amber:#ffb020;
+    --teal:#2dd4bf;
+    --shadow:#1a2230;
+    --line:#223047;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#05080c;color:var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    height:100%;overflow:hidden;}
+  #app{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;}
+  #stageWrap{
+    position:relative;
+    width: min(100vw, calc((100vh - 72px) * (16 / 9)));
+    aspect-ratio: 16 / 9;
+    background:var(--bg);
+    box-shadow:0 0 0 1px #1b2636, 0 18px 60px rgba(0,0,0,0.55);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  canvas{display:block;width:100%;height:100%;}
+  #bar{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;
+    width: min(100vw, calc((100vh - 72px) * (16 / 9)));
+    padding:6px 10px;
+  }
+  #bar button{
+    background:#16202e;color:var(--ink);border:1px solid #2a3a52;border-radius:6px;
+    padding:7px 12px;font-size:14px;font-family:inherit;cursor:pointer;line-height:1;
+  }
+  #bar button:hover{background:#1e2c40;border-color:#3a5074;}
+  #bar button.active{background:#1f3b45;border-color:var(--teal);color:#d7fff7;}
+  #bar .lbl{color:var(--ink2);font-size:13px;letter-spacing:.02em;text-transform:uppercase;}
+  #bar .sep{width:1px;height:22px;background:#263448;margin:0 4px;}
+  #bval{min-width:92px;text-align:center;font-size:14px;color:var(--amber);font-variant-numeric:tabular-nums;}
+  #tltip{
+    position:fixed; z-index:50; display:none; pointer-events:none;
+    max-width:340px; padding:11px 15px;
+    background:rgba(14,21,33,0.97); color:#dce7f6;
+    border:1.5px solid var(--teal); border-radius:11px;
+    font-size:14.5px; line-height:1.42; font-family:inherit;
+    box-shadow:0 12px 34px rgba(0,0,0,0.55);
+    transform:translate(0,-100%);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stageWrap">
+    <canvas id="c" width="1920" height="1080"></canvas>
+  </div>
+  <div id="bar">
+    <button id="pp">Pause</button>
+    <button id="restart">Restart</button>
+    <span class="sep"></span>
+    <span class="lbl">Audit&nbsp;budget</span>
+    <button id="bprev">&#9664;</button>
+    <span id="bval">auto</span>
+    <button id="bnext">&#9654;</button>
+    <button id="bauto" class="active">Auto</button>
+    <span class="sep"></span>
+    <span class="lbl">Scene</span>
+    <button data-scene="0">Swarm</button>
+    <button data-scene="1">Why</button>
+    <button data-scene="2">Spotlight</button>
+    <button data-scene="3">Missed</button>
+    <button data-scene="4">Residue</button>
+    <button data-scene="5">Takeaway</button>
+    <button data-scene="6">Caught early</button>
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+  /* ---------- constants ---------- */
+  const W = 1920, H = 1080;
+  const LOOP = 142;                // total loop length in seconds
+  const SCENES = [                 // time-ordered
+    {id:"A", start:0,   end:14,  title:"The swarm"},
+    {id:"F", start:14,  end:28,  title:"Why a monitor"},
+    {id:"B", start:28,  end:52,  title:"The audit spotlight"},
+    {id:"C", start:52,  end:80,  title:"What monitors miss"},
+    {id:"E", start:80,  end:104, title:"The residue"},
+    {id:"D", start:104, end:124, title:"The takeaway"},
+    {id:"G", start:124, end:142, title:"What a modest budget could have caught", short:"Caught early"}
+  ];
+  const BUDGETS = [0.5, 1, 2, 5, 10, 20];                 // percent
+  const RESIDUE = [20.2, 12.0, 8.6, 8.0, 6.2, 3.6];       // MEASURED correlated residue % (code backdoors)
+  const UNCAUGHT_CORR  = [20, 12, 9, 8, 6, 4];            // tokens (of 100) uncaught - correlated (round of residue)
+  const UNCAUGHT_INDEP = [20, 6, 2, 0, 0, 0];             // tokens (of 100) uncaught - HYPOTHETICAL independent model
+
+  // 16 hard-coded anonymized codenames (no numbers, no vendor/model names).
+  const NAMES = ["Ferryman","Lamplighter","Magpie","Sweeper",
+                 "Warden","Dowser","Tinker","Beacon",
+                 "Cobbler","Kestrel","Scrivener","Harrier",
+                 "Forager","Mariner","Thatcher","Pilgrim"];
+
+  const COL = {
+    bg:"#0b0f14", panel:"#121823", ink:"#e8edf4", ink2:"#9aa7bd", dim:"#6c7a90",
+    benign:"#8a94a6", amber:"#ffb020", amberDeep:"#b4791f", teal:"#2dd4bf",
+    shadow:"#141b27", line:"#223047", warm:"#ffe6ad"
+  };
+
+  /* ---------- impact categories ----------
+     TWO SEPARATE data sources, never conflated:
+       (1) the residue-vs-budget catch rates (RESIDUE) are measured on CODE BACKDOORS.
+       (2) the category shares below are an APPROXIMATE pattern-classification of the
+           public "Swarm Traces" incident (what kinds of action got through).
+     Shares are approximate and do NOT sum to 100 (about a quarter did not classify).
+     `mix` only drives dot coloring; `dwell` weights caption time toward big categories. */
+  const CATS = [
+    {key:"cred",  name:"Credential theft/use",     color:"#ff5d73", share:28.5, approx:"~28%", barW:28.5, mix:39,  dwell:5.5, label:"Agent reusing a stored credential against an internal service"},
+    {key:"rci",   name:"Remote code injection",    color:"#ff9d3c", share:19.6, approx:"~20%", barW:19.6, mix:27,  dwell:4.5, label:"Agent loading a remote script into the build"},
+    {key:"exfil", name:"Data exfiltration",        color:"#ffe14d", share:12.4, approx:"~12%", barW:12.4, mix:17,  dwell:3.5, label:"Agent transferring a sensitive dataset to an external host over an encrypted channel"},
+    {key:"c2",    name:"Controller check-in (C2)", color:"#5b8cff", share:7.6,  approx:"~8%",  barW:7.6,  mix:11,  dwell:3.0, label:"Agent polling an external controller for its next task"},
+    {key:"cache", name:"Cache poisoning",          color:"#b07bff", share:4.1,  approx:"~4%",  barW:4.1,  mix:6,   dwell:2.5, label:"Agent publishing a tampered artifact to the shared cache"},
+    {key:"trace", name:"Trace/log removal",        color:"#ff6fd8", share:0.3,  approx:"<1%",  barW:1.0,  mix:0.4, dwell:1.5, label:"Agent deleting its own activity log entries"}
+  ];
+  // the six classified categories above do not sum to 100; roughly a quarter did not classify
+  const UNCLASSIFIED = {name:"Unclassified / other", color:"#5b6c84", approx:"~27%", barW:27};
+  const CAT_SHORT = ["credential theft","remote code inj.","data exfiltration","C2 check-in","cache poisoning","trace removal"];
+  // category per residue token in the suspicion-ranked grid; orders 80..99 are the residue tail
+  const CAT_TAIL = [0,1,2,0,1,0,3,2,0,1, 0,4,2,0,1,0,3,2,1,0];
+  function catForOrder(o){ return o>=80 ? CAT_TAIL[o-80] : 0; }
+  // 100-dot residue field spread by the normalized mix [39,27,17,11,6,0]
+  function buildMix(counts){
+    const total = counts.reduce((a,b)=>a+b,0);
+    const acc = counts.map(function(){return 0;}); const out=[];
+    for(let i=0;i<total;i++){
+      let best=-1, bv=-Infinity;
+      for(let c=0;c<counts.length;c++){
+        if(acc[c]>=counts[c]) continue;
+        const v = counts[c]/(acc[c]+0.5);
+        if(v>bv){ bv=v; best=c; }
+      }
+      if(best<0) best=0;
+      acc[best]++; out.push(best);
+    }
+    return out;
+  }
+  const MIX100 = buildMix([39,27,17,11,5,1]);  // every category gets at least one token (trace removal is rare but present)
+
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  // Timeline hover hint: the track is not a scrubber, so point people at the stage buttons.
+  const tltip = document.createElement("div");
+  tltip.id = "tltip";
+  tltip.textContent = "The timeline is not draggable. Use the stage buttons below to jump between sections.";
+  document.body.appendChild(tltip);
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) / rect.width * W;
+    const my = (e.clientY - rect.top) / rect.height * H;
+    if (my > 1012 && my < 1072 && mx > 56 && mx < 1872) {
+      tltip.style.display = "block";
+      tltip.style.left = (e.clientX + 14) + "px";
+      tltip.style.top = (e.clientY - 10) + "px";
+    } else { tltip.style.display = "none"; }
+  });
+  canvas.addEventListener("mouseleave", () => { tltip.style.display = "none"; });
+
+  /* ---------- state ---------- */
+  const state = {
+    playing:true,
+    t:0,                 // current loop time (seconds)
+    manualBudget:null,   // null => auto; else index 0..5
+  };
+  let lastNow = performance.now();
+  let lastScene = null;
+  const audit = { coverB:0, coverL:0, coverR:0 };   // eased "caught token" counts
+
+  /* ---------- particle system (scene A ambiance) ---------- */
+  const agents = NAMES.map((name,i)=>{
+    const col = i % 4, row = (i / 4) | 0;
+    return { name, x: 360 + col*400, y: 285 + row*165, acc: Math.random()*0.2 };
+  });
+  const particles = [];
+  function spawnParticle(a){
+    const attack = Math.random() < 0.17;
+    particles.push({
+      x: a.x + (Math.random()-0.5)*18,
+      y: a.y + (Math.random()-0.5)*12,
+      vx: (Math.random()-0.5)*46,
+      vy: -14 - Math.random()*30,
+      life: 0,
+      max: attack ? (2.2 + Math.random()*1.0) : (1.6 + Math.random()*1.0),
+      type: attack ? "attack" : "benign"
+    });
+  }
+  function updateParticles(dt, emitting){
+    if(emitting){
+      for(const a of agents){
+        a.acc += dt;
+        while(a.acc > 0.22){ a.acc -= 0.22; spawnParticle(a); }
+      }
+    }
+    for(const p of particles){
+      p.life += dt;
+      p.x += p.vx*dt; p.y += p.vy*dt;
+      p.vy += 4*dt; // gentle settle
+    }
+    for(let i=particles.length-1;i>=0;i--){ if(particles[i].life>=particles[i].max) particles.splice(i,1); }
+    if(particles.length>520) particles.splice(0, particles.length-520);
+  }
+
+  /* ---------- drawing helpers ---------- */
+  function text(s,x,y,o){
+    o = o||{};
+    ctx.save();
+    ctx.globalAlpha = o.alpha==null?1:o.alpha;
+    ctx.fillStyle = o.color||COL.ink;
+    ctx.font = (o.weight||400)+" "+(o.size||28)+"px system-ui, Arial, sans-serif";
+    ctx.textAlign = o.align||"left";
+    ctx.textBaseline = o.baseline||"alphabetic";
+    ctx.fillText(s,x,y);
+    ctx.restore();
+  }
+  function circle(x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); }
+  function triangle(x,y,r){ ctx.beginPath(); ctx.moveTo(x,y-r); ctx.lineTo(x+r*0.92,y+r*0.78); ctx.lineTo(x-r*0.92,y+r*0.78); ctx.closePath(); }
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+  function wrap(s,maxW,font){
+    ctx.font = font;
+    const words = s.split(" ");
+    const lines = []; let line="";
+    for(const w of words){
+      const t = line ? line+" "+w : w;
+      if(ctx.measureText(t).width>maxW && line){ lines.push(line); line=w; }
+      else line=t;
+    }
+    if(line) lines.push(line);
+    return lines;
+  }
+
+  function drawBenign(x,y,r,a){
+    ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=COL.benign;
+    circle(x,y,r); ctx.fill(); ctx.restore();
+  }
+  function drawAttack(x,y,r,a){
+    ctx.save(); ctx.globalAlpha=a;
+    ctx.fillStyle=COL.amber; ctx.strokeStyle="#5a3c0b"; ctx.lineWidth=2;
+    triangle(x,y,r); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  function drawContained(x,y,r){
+    ctx.save();
+    ctx.shadowColor="rgba(45,212,191,0.55)"; ctx.shadowBlur=10;
+    ctx.fillStyle=COL.teal; circle(x,y,r); ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle="rgba(255,255,255,0.8)"; ctx.lineWidth=2.4; ctx.lineJoin="round";
+    ctx.beginPath();
+    ctx.moveTo(x-r*0.42,y+r*0.02);
+    ctx.lineTo(x-r*0.08,y+r*0.42);
+    ctx.lineTo(x+r*0.5,y-r*0.42);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawShadowAttack(x,y,r,color){
+    const c = color || COL.amber;
+    ctx.save();
+    ctx.fillStyle="rgba(5,8,13,0.82)"; circle(x,y,r*1.55); ctx.fill();
+    // dark, category-tinted fill then a vivid category-colored outline
+    if(color){ ctx.globalAlpha=0.22; ctx.fillStyle=c; triangle(x,y,r); ctx.fill(); ctx.globalAlpha=1; }
+    else { ctx.fillStyle="#241a0c"; triangle(x,y,r); ctx.fill(); }
+    ctx.strokeStyle=c; ctx.lineWidth=2.2;
+    triangle(x,y,r); ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---------- scene / budget helpers ---------- */
+  function sceneAt(t){
+    for(const s of SCENES){ if(t < s.end) return s; }
+    return SCENES[SCENES.length-1];
+  }
+  function budgetIndexFor(scene, tl){
+    if(state.manualBudget!=null) return state.manualBudget;
+    if(scene==="B"){ if(tl<3) return -1; return clamp(Math.floor((tl-3)/((24-3)/6)),0,5); }
+    if(scene==="C"){ return clamp(Math.floor((tl-3)/4),0,5); }
+    return -1;
+  }
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+
+  /* ---------- common header + watermark ---------- */
+  function drawHeader(scene, localT){
+    const fade = clamp(localT/0.5,0,1);
+    text(scene.title, 80, 66, {size:46, weight:800, color:COL.ink, alpha:fade});
+    let cap = "";
+    if(scene.id==="A") cap = "Anonymized agents emit far more actions than any human can review.";
+    if(scene.id==="F") cap = "Why audit a budget: a trusted monitor scores every action; humans review only the top few percent most-suspicious.";
+    if(scene.id==="B") cap = "The audit budget investigates the top few percent most-suspicious actions. Audited attacks are contained; a stubborn cluster stays in shadow.";
+    if(scene.id==="C") cap = "Widen the budget 0.5% to 20%. Left (independent) empties toward zero; right (correlated) keeps a residue in the same cells. The gap is the finding.";
+    if(scene.id==="E") cap = "The uncaught residue, made concrete.";
+    if(scene.id==="G") cap = "Grounding the stakes in the real July 2026 Swarm Traces incident (public investigation).";
+    text(cap, 80, 108, {size:25, weight:500, color:COL.ink2, alpha:fade});
+  }
+
+  function drawWatermark(){
+    const s = "SIMULATION - illustrative, not real telemetry.";
+    ctx.save();
+    ctx.font = "600 19px system-ui, Arial, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "top";
+    const w = ctx.measureText(s).width;
+    const x = W - 22, y = 20, pad = 12;
+    ctx.fillStyle = "rgba(8,12,18,0.72)";
+    roundRect(x - w - pad*2, y - 6, w + pad*2 + 6, 32, 6); ctx.fill();
+    ctx.fillStyle = "#ffd27a";
+    ctx.fillText(s, x, y);
+    ctx.restore();
+  }
+
+  function commas(n){ return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
+  function drawLegend(x,y,full){
+    let items = [
+      {kind:"benign", t:"benign action"},
+      {kind:"attack", t:"flagged suspicious"},
+      {kind:"contained", t:"contained (audited)"},
+      {kind:"shadow", t:"uncaught (in shadow)"}
+    ];
+    if(!full) items = items.slice(0,2);   // swarm scene: only benign + suspicious states exist yet
+    ctx.save();
+    ctx.fillStyle="rgba(10,15,22,0.6)";
+    roundRect(x-16, y-26, full?1240:560, 46, 8); ctx.fill();
+    let cx = x;
+    for(const it of items){
+      if(it.kind==="benign") drawBenign(cx, y-4, 9, 1);
+      if(it.kind==="attack") drawAttack(cx, y-3, 11, 1);
+      if(it.kind==="contained") drawContained(cx, y-4, 11);
+      if(it.kind==="shadow") drawShadowAttack(cx, y-3, 10);
+      text(it.t, cx+24, y+3, {size:22, color:COL.ink2});
+      ctx.font="400 22px system-ui, Arial, sans-serif";
+      cx += 34 + ctx.measureText(it.t).width + 48;
+    }
+    ctx.restore();
+  }
+
+  // 2-state swatch legend, right-aligned just under the watermark banner (swarm scene)
+  function drawSwatchLegendTR(y){
+    const items=[{kind:"benign",t:"benign action"},{kind:"attack",t:"flagged suspicious"}];
+    ctx.save();
+    ctx.font="400 22px system-ui, Arial, sans-serif";
+    const widths=items.map(it=>ctx.measureText(it.t).width);
+    let tot=0; for(const w of widths) tot += 22 + w + 40;
+    const rightX = W-22;
+    const boxLeft = rightX - tot - 10;
+    ctx.fillStyle="rgba(10,15,22,0.6)";
+    roundRect(boxLeft, y-24, (rightX-boxLeft)+8, 42, 8); ctx.fill();
+    let cx = boxLeft + 18;
+    for(let i=0;i<items.length;i++){
+      if(items[i].kind==="benign") drawBenign(cx, y-5, 9, 1); else drawAttack(cx, y-4, 11, 1);
+      text(items[i].t, cx+22, y+2, {size:22, color:COL.ink2});
+      cx += 22 + widths[i] + 40;
+    }
+    ctx.restore();
+  }
+
+  /* ---------- SCENE A ---------- */
+  function swarmField(localT, alpha, prog){
+    // The real scale: a dense field of agents, many of them turned, all emitting actions.
+    const COLS=46, ROWS=22, N=COLS*ROWS;          // ~1,012, reads as "about 1,000"
+    const fx=150, fy=205, fw=1620, fh=560, cw=fw/COLS, ch=fh/ROWS;
+    const compFrac = 0.18 + 0.48*prog;            // many agents turn harmful as it develops
+    for(let i=0;i<N;i++){
+      const col=i%COLS, row=(i/COLS)|0;
+      const ax=fx+cw*(col+0.5), ay=fy+ch*(row+0.5);
+      const h=Math.sin(i*12.9898)*43758.5453, r=h-Math.floor(h);
+      const comp = r < compFrac;
+      ctx.globalAlpha = alpha*(comp?0.92:0.5);
+      ctx.fillStyle = comp ? COL.amber : COL.benign;
+      circle(ax,ay, comp?2.7:2.0); ctx.fill();
+      const pulse = Math.sin(localT*2.7 + i*0.9);
+      if(pulse>0.9){
+        const sa = alpha*((pulse-0.9)/0.1);
+        if(comp) drawAttack(ax, ay-5, 4.0, sa*0.95);
+        else     drawBenign(ax, ay-4, 2.1, sa*0.75);
+      }
+    }
+    ctx.globalAlpha=1;
+    text("The real swarm: about 1,000 agents", 960, 158, {size:27, weight:800, color:COL.ink, align:"center", alpha:alpha});
+    text("all emitting actions, many of them harmful", 960, 186, {size:19, weight:600, color:COL.ink2, align:"center", alpha:alpha*0.9});
+  }
+  function renderA(localT, fieldAlpha, showCounter){
+    const P1=5.0, TR=7.5;                                 // phase-1 hold, then zoom-out transition
+    const p1 = clamp(1-(localT-P1)/(TR-P1),0,1);          // detailed-view alpha
+    const fa = clamp((localT-P1)/(TR-P1),0,1);            // full-scale field fade-in
+    const prog = clamp((localT-P1)/(14-P1),0,1);          // scale growth through phase 2
+
+    // ---- Phase 2: full-scale swarm field (behind the detail) ----
+    if(fa>0.002) swarmField(localT, fa*fieldAlpha, prog);
+
+    // ---- Phase 1: detailed named agents, zoom out + fade as p1 -> 0 ----
+    if(p1>0.002){
+      const da = p1*fieldAlpha;
+      ctx.save();
+      const z = 0.32 + 0.68*p1;                           // zoom out toward the centre
+      ctx.translate(960,540); ctx.scale(z,z); ctx.translate(-960,-540);
+      for(const a of agents){
+        ctx.save();
+        const g = ctx.createRadialGradient(a.x,a.y,2,a.x,a.y,70);
+        g.addColorStop(0,"rgba(45,70,100,"+(0.30*da)+")");
+        g.addColorStop(1,"rgba(45,70,100,0)");
+        ctx.fillStyle=g; circle(a.x,a.y,70); ctx.fill();
+        ctx.restore();
+      }
+      for(const p of particles){
+        const inAlpha = clamp(p.life/0.15,0,1);
+        let a;
+        if(p.type==="attack"){
+          const k = p.life < p.max*0.78 ? 1 : 1-(p.life-p.max*0.78)/(p.max*0.22);
+          a = clamp(k,0,1)*inAlpha;
+          drawAttack(p.x,p.y, 10, a*da);
+        } else {
+          a = (1 - p.life/p.max)*0.85*inAlpha;
+          drawBenign(p.x,p.y, 5.2, a*da);
+        }
+      }
+      for(const a of agents){
+        ctx.save(); ctx.globalAlpha = da;
+        ctx.fillStyle="#1a2534"; ctx.strokeStyle="#3a506f"; ctx.lineWidth=2.5;
+        circle(a.x,a.y,24); ctx.fill(); ctx.stroke();
+        ctx.fillStyle="#9fd2ff"; circle(a.x,a.y,6); ctx.fill();
+        ctx.restore();
+        text(a.name, a.x, a.y+46, {size:20, weight:600, color:COL.ink2, align:"center", alpha:da});
+      }
+      ctx.restore();
+    }
+
+    // ---- running volume counter (climbs faster at full scale) ----
+    if(showCounter){
+      const actions = Math.floor(localT*2800 + prog*prog*280000);
+      const mal = Math.floor(actions*0.031);
+      const cardW=900, cardX=960-cardW/2;
+      ctx.save();
+      ctx.fillStyle="rgba(10,15,22,0.74)"; ctx.strokeStyle=COL.line; ctx.lineWidth=1.5;
+      roundRect(cardX,852,cardW,86,14); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle="#223047"; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(960,866); ctx.lineTo(960,924); ctx.stroke();
+      ctx.restore();
+      const cx1=735, cx2=1185;
+      text("Actions emitted", cx1, 884, {size:22, color:COL.ink2, weight:600, align:"center"});
+      text(commas(actions), cx1, 924, {size:38, weight:800, color:COL.ink, align:"center"});
+      text("Malicious", cx2, 884, {size:22, color:COL.ink2, weight:600, align:"center"});
+      text(commas(mal)+"  (~3%)", cx2, 924, {size:38, weight:800, color:COL.amber, align:"center"});
+      drawSwatchLegendTR(84);
+    }
+  }
+
+  /* ---------- SCENE F : why a monitor (the funnel) ---------- */
+  function lerp(a,b,u){ return a + (b-a)*u; }
+  // deterministic travelers, driven purely by localT (loop-safe)
+  const FTRAV = [];
+  for(let i=0;i<46;i++){
+    const susp = ((i*0.1370+0.08) % 1);
+    FTRAV.push({
+      off:(i*0.0617)%1, spd:0.070+(i%6)*0.009,
+      sx:150+((i*61)%330), sy:360+((i*47)%340),   // spawn point inside the Agent-actions panel
+      susp:susp, review:susp>0.9
+    });
+  }
+  function fArrow(x1,y1,x2,y2){
+    ctx.save(); ctx.strokeStyle="#4a6180"; ctx.fillStyle="#4a6180"; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2-14,y2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2,y2); ctx.lineTo(x2-18,y2-8); ctx.lineTo(x2-18,y2+8); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function fBox(x,y,w,h,accent,hl){
+    ctx.save();
+    ctx.fillStyle = hl ? "rgba(70,56,26,0.5)" : "rgba(12,18,27,0.72)";
+    ctx.strokeStyle=accent; ctx.lineWidth=2; roundRect(x,y,w,h,14); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  function renderF(localT){
+    const fade = clamp(localT/0.6,0,1);
+    ctx.save(); ctx.globalAlpha = fade;
+
+    // ---- funnel outline (many to few) ----
+    ctx.strokeStyle="rgba(74,97,128,0.35)"; ctx.lineWidth=2; ctx.setLineDash([4,8]);
+    ctx.beginPath(); ctx.moveTo(500,330); ctx.lineTo(1420,352); ctx.moveTo(500,710); ctx.lineTo(1420,428); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ---- Node 1: agent actions ----
+    fBox(120,320,380,400,"#3a506f");
+    text("Agent actions", 310, 356, {size:25, weight:800, color:COL.ink, align:"center"});
+    // living cloud: dots drift gently so the panel reads as a moving stream, not a still image
+    for(let i=0;i<110;i++){
+      const gx = 150 + ((i*37)%336) + Math.sin(localT*0.8 + i*0.7)*6;
+      const gy = 384 + ((i*73)%316) + Math.cos(localT*0.9 + i*1.3)*5;
+      if(i%8===0) drawAttack(gx,gy,7,0.9); else drawBenign(gx,gy,4,0.62);
+    }
+    text("far more than any human can review", 310, 748, {size:18, color:COL.ink2, align:"center"});
+
+    // ---- Node 2: trusted monitor ----
+    fBox(760,320,380,400,"#3a6f5f");
+    text("Trusted monitor", 950, 356, {size:25, weight:800, color:COL.ink, align:"center"});
+    text("scores every action 0-100 for suspicion", 950, 748, {size:18, color:COL.ink2, align:"center"});
+    // suspicion scale
+    const sbx=1070, sbTop=390, sbBot=690;
+    const grad = ctx.createLinearGradient(0,sbTop,0,sbBot);
+    grad.addColorStop(0,"#ff9d3c"); grad.addColorStop(1,"#8a94a6");
+    ctx.fillStyle=grad; roundRect(sbx,sbTop,26,sbBot-sbTop,8); ctx.fill();
+    text("high", sbx-12, sbTop+14, {size:17, color:"#ffb98a", align:"right"});
+    text("low",  sbx-12, sbBot-2,  {size:17, color:COL.ink2, align:"right"});
+
+    // ---- Node 3: review vs not reviewed ----
+    fBox(1420,320,360,120,COL.warm,true);
+    text("Human review", 1600, 362, {size:24, weight:800, color:COL.warm, align:"center"});
+    text("top few percent (audit budget)", 1600, 408, {size:18, color:"#e9d6a6", align:"center"});
+    fBox(1420,470,360,250,"#5b6c84");
+    text("Not reviewed", 1600, 512, {size:24, weight:800, color:COL.ink2, align:"center"});
+    text("the remaining ~98-99%", 1600, 556, {size:18, color:COL.dim, align:"center"});
+
+    // ---- arrows ----
+    fArrow(500,520,756,520);
+    fArrow(1140,470,1416,384);
+    fArrow(1140,600,1416,595);
+
+    // ---- travelers: continuous stream from the panel, through the monitor, then split ----
+    for(const tr of FTRAV){
+      const ph = (localT*tr.spd + tr.off) % 1;
+      const monY = 680 - tr.susp*300;
+      const destY = tr.review ? 380 : 595;
+      let x,y;
+      if(ph<0.30){ const u=ph/0.30; x=lerp(tr.sx,500,u); y=tr.sy + Math.sin(localT*1.1 + tr.off*6)*4; }     // drift out of the panel
+      else if(ph<0.62){ const u=(ph-0.30)/0.32; x=lerp(500,950,u); y=lerp(tr.sy,monY,u); }                  // flow to the monitor
+      else { const u=easeInOut((ph-0.62)/0.38); x=lerp(950,1600,u); y=lerp(monY,destY,u); }                 // split to review / not-reviewed
+      const hot = tr.susp>0.62;
+      if(hot) drawAttack(x,y,6,0.95); else drawBenign(x,y,4.5,0.85);
+    }
+    ctx.restore();
+
+    // ---- explanatory strip ----
+    text("Many actions   →   monitor scores each   →   humans review only the top few percent (the audit budget, 0.5% up to 20%).",
+         960, 862, {size:24, weight:600, color:COL.ink, align:"center", alpha:fade});
+    text("Everything below the budget line goes unreviewed. The next scenes sweep that budget and ask what gets through.",
+         960, 898, {size:21, weight:500, color:COL.ink2, align:"center", alpha:fade});
+  }
+
+  /* ---------- grid geometry ---------- */
+  function gridPos(x0,y0,cellW,cellH,order){
+    const col = order % 10, row = (order/10)|0;
+    return { x: x0 + col*cellW + cellW/2, y: y0 + row*cellH + cellH/2 };
+  }
+  // draw 100 tokens; "cover" tokens (lowest order = most suspicious) are contained.
+  function drawTokenGrid(x0,y0,cellW,cellH,r,cover,colorResidue){
+    for(let o=0;o<100;o++){
+      const p = gridPos(x0,y0,cellW,cellH,o);
+      // each cell shows exactly one icon: contained once the eased boundary passes it, else uncaught.
+      if(cover - o >= 0.5){
+        drawContained(p.x,p.y,r);
+      } else {
+        const col = colorResidue ? CATS[catForOrder(o)].color : null;
+        drawShadowAttack(p.x, p.y, r, col);
+      }
+    }
+  }
+
+  // caught-ordering for the Shadow scene: cells farthest from the bottom-right corner are
+  // caught first, so the residue is a compact cluster hugging one corner (the "same place").
+  const CATCH_RANK = (function(){
+    const cells=[];
+    for(let o=0;o<100;o++){ const col=o%10,row=(o/10)|0; cells.push({o,d:(9-col)+(9-row),col,row}); }
+    cells.sort((a,b)=> (b.d-a.d) || (a.row-b.row) || (a.col-b.col)); // farthest (top-left) caught first
+    const rank=new Array(100);
+    for(let i=0;i<100;i++) rank[cells[i].o]=i;
+    return rank;
+  })();
+  function catForCell(o){ const rnk=CATCH_RANK[o]; return rnk>=80 ? CAT_TAIL[rnk-80] : 0; }
+
+  // a bold, saturated, pulsing residue token (used in the Shadow scene so the residue pops)
+  function drawResidueBold(x,y,r,color,pulse){
+    const rr=r*1.3;
+    ctx.save();
+    ctx.globalAlpha = 0.20+0.34*pulse; ctx.fillStyle=color; circle(x,y,rr*1.7); ctx.fill(); // pulsing glow
+    ctx.globalAlpha = 1;
+    ctx.fillStyle=color; triangle(x,y,rr); ctx.fill();                                        // saturated fill
+    ctx.strokeStyle="rgba(255,255,255,0.7)"; ctx.lineWidth=1.6; triangle(x,y,rr); ctx.stroke();
+    ctx.restore();
+  }
+  // grid for the Shadow scene: dim caught tokens, bold pulsing residue in a corner cluster
+  function drawShadowGrid(x0,y0,cellW,cellH,r,cover,colorResidue,pulse){
+    const cc=Math.round(cover);
+    for(let o=0;o<100;o++){
+      const p=gridPos(x0,y0,cellW,cellH,o);
+      if(CATCH_RANK[o] < cc){ drawContained(p.x,p.y,r); }
+      else { drawShadowAttack(p.x,p.y,r, colorResidue?CATS[catForCell(o)].color:null); }
+    }
+  }
+
+  // compact horizontal legend of the impact categories.
+  // if `present` (a Set of indices) is given, categories still in the residue are bright and
+  // the rest are dimmed, so the viewer sees which kinds persist as the budget widens.
+  function drawCategoryLegend(x,y,present){
+    ctx.save();
+    ctx.font = "20px system-ui, Arial, sans-serif";
+    const header = present ? ("Still in the residue ("+present.size+" of 6 kinds):") : "Residue impact categories:";
+    text(header, x, y, {size:20, weight:700, color:COL.ink2});
+    let cx = x + ctx.measureText(header).width + 28;
+    for(let i=0;i<CATS.length;i++){
+      const on = present ? present.has(i) : true;
+      drawShadowAttack(cx, y-6, 10, CATS[i].color);
+      ctx.font = "20px system-ui, Arial, sans-serif";
+      text(CAT_SHORT[i], cx+20, y, {size:20, color:COL.ink2, weight: on?700:400});
+      const chipW = 20 + ctx.measureText(CAT_SHORT[i]).width;
+      if(!on){ ctx.save(); ctx.fillStyle="rgba(11,15,20,0.62)"; ctx.fillRect(cx-14, y-20, chipW+20, 28); ctx.restore(); }
+      cx += chipW + 32;
+    }
+    ctx.restore();
+  }
+
+  /* ---------- SCENE B ---------- */
+  function renderB(localT){
+    const idx = budgetIndexFor("B", localT);
+    const x0=610,y0=250,w=700,h=540,cellW=w/10,cellH=h/10, r=15;
+
+    // panel backdrop
+    ctx.save();
+    ctx.fillStyle="rgba(12,18,27,0.72)";
+    roundRect(x0-28,y0-28,w+56,h+56,14); ctx.fill();
+    ctx.strokeStyle=COL.line; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.restore();
+
+    // spotlight glow over contained region (top rows down to boundary)
+    const coveredRows = audit.coverB/10;
+    const boundaryY = y0 + coveredRows*cellH;
+    if(audit.coverB>0.5){
+      ctx.save();
+      const g = ctx.createLinearGradient(0,y0-26,0,boundaryY+30);
+      g.addColorStop(0,"rgba(255,230,173,0.18)");
+      g.addColorStop(1,"rgba(255,230,173,0.0)");
+      ctx.fillStyle=g; ctx.fillRect(x0-26,y0-26, w+52, (boundaryY+30)-(y0-26));
+      ctx.restore();
+    }
+
+    drawTokenGrid(x0,y0,cellW,cellH,r,audit.coverB);
+
+    // shadow-zone label on remaining uncaught cluster (bottom-right)
+    if(idx>=0){
+      text("shared blind spot", x0+w-6, y0+h+30, {size:20, weight:600, color:COL.amber, align:"right"});
+    }
+
+    // ---- HUD (left stack) ----
+    const hx=120, hy=330;
+    text("Audit budget", hx, hy, {size:24, color:COL.ink2, weight:600});
+    text(idx<0 ? "--" : BUDGETS[idx]+"%", hx, hy+62, {size:62, weight:800, color:COL.warm});
+    text("Contained", hx, hy+130, {size:24, color:COL.ink2, weight:600});
+    text(Math.round(audit.coverB)+" / 100 flagged", hx, hy+180, {size:40, weight:800, color:COL.teal});
+    text("Uncaught residue", hx, hy+248, {size:24, color:COL.ink2, weight:600});
+    text(idx<0 ? "--" : RESIDUE[idx].toFixed(1)+"%", hx, hy+300, {size:48, weight:800, color:COL.amber});
+
+    // ---- budget ladder (right) : the "sweep" control ----
+    const lx=1430, ly=270, lh=520, step=lh/5;
+    ctx.save();
+    ctx.strokeStyle=COL.line; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly+lh); ctx.stroke();
+    for(let i=0;i<6;i++){
+      const yy = ly + i*step;
+      const on = (idx>=0 && i<=idx);
+      ctx.fillStyle = on ? COL.warm : "#2c3c54";
+      circle(lx, yy, i===idx?11:7); ctx.fill();
+      text(BUDGETS[i]+"%", lx+22, yy+7, {size:22, weight: i===idx?800:500, color: i===idx?COL.warm:COL.dim});
+    }
+    text("audit budget", lx+28, ly-46, {size:20, color:COL.ink2, align:"center", weight:600});
+    text("sweep",        lx+28, ly-24, {size:20, color:COL.ink2, align:"center", weight:600});
+    ctx.restore();
+
+    drawLegend(80, 962, true);
+  }
+
+  /* ---------- SCENE C ---------- */
+  function renderC(localT){
+    const idx = budgetIndexFor("C", localT);
+    const pulse = 0.5 + 0.5*Math.sin(localT*3.4);
+
+    // central budget readout + step indicator (makes the sweep visible)
+    text("Audit budget", 960, 150, {size:22, color:COL.ink2, align:"center", weight:600});
+    text(BUDGETS[idx]+"%", 960, 198, {size:44, weight:800, color:COL.warm, align:"center"});
+    for(let i=0;i<6;i++){
+      const sx=820+i*48;
+      ctx.save(); ctx.fillStyle = i<=idx ? COL.warm : "#2c3c54"; circle(sx,206, i===idx?8:5); ctx.fill(); ctx.restore();
+    }
+
+    const y0=288, h=470, cellH=h/10, r=14;
+    const panelW=650, cellW=panelW/10;
+    const lx0=150, rx0=1120;
+
+    // panel titles (EXACT required labels)
+    text("If monitor failures were independent", lx0+panelW/2, 248, {size:30, weight:800, color:"#bcd0ff", align:"center"});
+    text("Measured: correlated failure", rx0+panelW/2, 248, {size:30, weight:800, color:COL.amber, align:"center"});
+
+    // panel backdrops
+    for(const px of [lx0,rx0]){
+      ctx.save();
+      ctx.fillStyle="rgba(12,18,27,0.72)";
+      roundRect(px-24,y0-24,panelW+48,h+48,14); ctx.fill();
+      ctx.strokeStyle=COL.line; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.restore();
+    }
+
+    // grids: dim caught, bold pulsing clustered residue (dots stay at full clarity, no dimming wash)
+    drawShadowGrid(lx0,y0,cellW,cellH,r,audit.coverL,false,pulse);
+    drawShadowGrid(rx0,y0,cellW,cellH,r,audit.coverR,true,pulse);
+
+
+    // center gap annotation: divider exactly midway between the two panels' inner edges
+    const dividerX = (lx0 + panelW + rx0) / 2;
+    ctx.save();
+    ctx.setLineDash([6,8]); ctx.strokeStyle="#33425c"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(dividerX,y0-8); ctx.lineTo(dividerX,y0+h+8); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // readouts beneath panels
+    const leftCount = UNCAUGHT_INDEP[idx];
+    const leftTxt = leftCount===0 ? "cleared to ~0" : "~"+leftCount+" remain";
+    text("Uncaught residue:", lx0+panelW/2, y0+h+52, {size:26, weight:600, color:COL.ink2, align:"center"});
+    text(leftTxt, lx0+panelW/2, y0+h+98, {size:40, weight:800, color: leftCount===0?COL.teal:"#7fe0cf", align:"center"});
+    text("(hypothetical)", lx0+panelW/2, y0+h+132, {size:20, color:COL.dim, align:"center"});
+
+    text("Caught by no monitor:", rx0+panelW/2, y0+h+52, {size:26, weight:600, color:COL.ink2, align:"center"});
+    text(RESIDUE[idx].toFixed(1)+"%", rx0+panelW/2, y0+h+102, {size:54, weight:800, color:COL.amber, align:"center"});
+    text("(measured on code backdoors)", rx0+panelW/2, y0+h+136, {size:20, color:COL.dim, align:"center"});
+
+    // which impact kinds are still in the residue at this budget (shrinks as the budget widens)
+    const u = UNCAUGHT_CORR[idx];
+    const present = new Set();
+    for(let k=20-u; k<20; k++) present.add(CAT_TAIL[k]);
+    drawCategoryLegend(150, 958, present);
+  }
+
+  /* ---------- SCENE E : the residue, by impact category ---------- */
+  function renderE(localT){
+    // ---- left: residue cluster colored by the normalized impact mix ----
+    const px=120, py=190, pw=740, ph=520, cw=pw/10, ch=ph/10, r=15;
+    ctx.save();
+    ctx.fillStyle="rgba(12,18,27,0.72)";
+    roundRect(px-20,py-20,pw+40,ph+40,14); ctx.fill();
+    ctx.strokeStyle=COL.line; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.restore();
+    for(let i=0;i<100;i++){
+      const col=i%10, row=(i/10)|0;
+      drawShadowAttack(px+col*cw+cw/2, py+row*ch+ch/2, r, CATS[MIX100[i]].color);
+    }
+    text("Colored by impact category", px+pw/2, py+ph+36, {size:22, color:COL.ink2, align:"center", weight:600});
+
+    // ---- rotating sanitized action caption; dwell weighted toward the big categories ----
+    let ci=0; { let total=0; for(const c of CATS) total+=c.dwell; let tt=localT % total; for(let i=0;i<CATS.length;i++){ if(tt < CATS[i].dwell){ ci=i; break; } tt-=CATS[i].dwell; } }
+    const cat = CATS[ci];
+    const di = MIX100.indexOf(ci);
+    const bx=px-20, by=py+ph+76, bw=pw+40, bh=140;
+    ctx.save();
+    ctx.fillStyle="rgba(10,15,22,0.92)"; ctx.strokeStyle=cat.color; ctx.lineWidth=2;
+    roundRect(bx,by,bw,bh,12); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    if(di>=0){
+      const dcol=di%10, drow=(di/10)|0;
+      const dx=px+dcol*cw+cw/2, dy=py+drow*ch+ch/2;
+      ctx.save();
+      ctx.strokeStyle=cat.color; ctx.lineWidth=2; ctx.globalAlpha=0.9;
+      circle(dx,dy,r+8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(dx,dy+r+8); ctx.lineTo(dx,by); ctx.stroke();
+      ctx.restore();
+    }
+    text(cat.name + " (sanitized)", bx+26, by+46, {size:24, weight:800, color:cat.color});
+    const al = wrap(cat.label, bw-56, "500 24px system-ui, Arial, sans-serif");
+    let aly=by+88; for(const ln of al){ text(ln, bx+26, aly, {size:24, weight:500, color:COL.ink}); aly+=34; }
+
+    // ---- right: tally card (incident composition) ----
+    const tx=940, ty=190, tw=860, th=760;
+    ctx.save();
+    ctx.fillStyle="rgba(14,20,30,0.9)"; ctx.strokeStyle=COL.line; ctx.lineWidth=1.5;
+    roundRect(tx,ty,tw,th,16); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    text("The residue is not abstract.", tx+34, ty+58, {size:40, weight:800, color:COL.ink});
+    const sub = wrap("What got through, by impact category (Swarm Traces incident):", tw-68, "500 22px system-ui, Arial, sans-serif");
+    let sy=ty+96; for(const ln of sub){ text(ln, tx+34, sy, {size:22, weight:500, color:COL.ink2}); sy+=30; }
+    const rows = CATS.concat([UNCLASSIFIED]);
+    const rowY0 = sy+34, rowH=68;
+    for(let i=0;i<rows.length;i++){
+      const c=rows[i], ry=rowY0+i*rowH;
+      drawShadowAttack(tx+54, ry-6, 12, c.color);
+      text(c.name, tx+86, ry, {size:24, weight:700, color:COL.ink});
+      text(c.approx, tx+tw-38, ry, {size:24, weight:800, color:c.color, align:"right"});
+      const bX=tx+86, bY=ry+16, bW=tw-86-38, bH=13;
+      ctx.save();
+      ctx.fillStyle="rgba(30,42,60,0.9)"; roundRect(bX,bY,bW,bH,7); ctx.fill();
+      ctx.fillStyle=c.color; roundRect(bX,bY,Math.max(7,bW*(c.barW/28.5)),bH,7); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  /* ---------- SCENE D ---------- */
+  function cardAlpha(localWithin, dur){
+    const fin = clamp(localWithin/0.7,0,1);
+    const fout = clamp((dur-localWithin)/0.7,0,1);
+    return Math.min(fin,fout);
+  }
+  function drawCard(lines, subLines, a, accent){
+    ctx.save();
+    ctx.globalAlpha = a;
+    const maxW = 1360;
+    ctx.fillStyle="rgba(14,20,30,0.9)";
+    roundRect(280, 300, 1360, 480, 20); ctx.fill();
+    ctx.strokeStyle = accent; ctx.lineWidth=2; ctx.stroke();
+    ctx.restore();
+
+    let y = 300 + 480/2 - (lines.length*62 + subLines.length*44)/2 + 44;
+    for(const ln of lines){
+      text(ln, 960, y, {size:50, weight:800, color:COL.ink, align:"center", alpha:a});
+      y += 62;
+    }
+    y += 22;
+    for(const ln of subLines){
+      text(ln, 960, y, {size:34, weight:500, color:accent, align:"center", alpha:a});
+      y += 44;
+    }
+  }
+  function renderD(localT){
+    const f1 = "500 36px system-ui, Arial, sans-serif";
+    if(localT < 10){
+      const a = cardAlpha(localT, 10);
+      const l1 = wrap("Widening the audit budget 40x (0.5% to 20%) cuts the uncaught residue from 20.2% to only 3.6%.", 1240, "800 50px system-ui, Arial, sans-serif");
+      const s1 = wrap("It never reaches zero, because monitors' blind spots overlap heavily. Headline holds only if monitor rates transfer to agent actions (see paper Appendix D).", 1240, f1);
+      drawCard(l1, s1, a, COL.amber);
+    } else {
+      const a = cardAlpha(localT-10, 10);
+      const l2 = wrap("The good news: the loud moves are cheap to catch.", 1240, "800 50px system-ui, Arial, sans-serif");
+      const s2 = wrap("Stealing credentials, phoning home, exfiltrating data: at a 2 percent audit budget our monitors flag them about three times in four. It is the quiet code backdoors that slip a whole panel. Cheap control stops the loud attacks; the subtle ones need more. Illustration, not a measurement.", 1300, f1);
+      drawCard(l2, s2, a, COL.teal);
+    }
+  }
+
+  /* ---------- SCENE G : mini-simulation of a trusted monitor on the documented chain ---------- */
+  const G_STEPS = [
+    {t:"1. Escape the sandbox", s:"egress + RCE"},
+    {t:"2. Breach + escalate",  s:"HF workers, creds, K8s"},
+    {t:"3. Artifactory SSRF",   s:"cache poison, pivot"},
+    {t:"4. Exfiltrate + C2",    s:"Docker Hub, DNS"}
+  ];
+  const G_FACTSTR = "Source: swarmtraces.org. The Artifactory SSRF is CVE-2026-66384.";
+  const GBX0=80, GBW=312, GGAP=50, GBY=432, GBH=150;
+  function gStepX(i){ return GBX0 + i*(GBW+GGAP); }   // i = 0..3 steps, 4 = final state
+  function renderG(localT){
+    const pulse = 0.5 + 0.5*Math.sin(localT*5);
+
+    // ---- two auto-toggling passes ----
+    const period = 18;
+    const pp = localT % period;
+    const noControl = pp < 9;
+    const pl = noControl ? pp : (pp - 9);         // 0..9 within the current pass; one A then one B, longer hold
+
+    // ---- derive chain state ----
+    const stepState=[0,0,0,0];                    // 0 pending, 1 attacking, 2 blocked
+    const arrowOn=[false,false,false,false];      // arrow after step i (i=3 points at final)
+    let finalState=0, monitorFlag=false;          // final: 0 pending, 1 breached, 2 prevented
+    if(noControl){
+      for(let i=0;i<4;i++){ if(pl > 0.5 + i*0.8) stepState[i]=1; }
+      for(let i=0;i<4;i++){ if(pl > 0.95 + i*0.8) arrowOn[i]=true; }
+      if(pl > 0.5 + 4*0.8) finalState=1;
+    } else {
+      if(pl > 0.4) stepState[0]=1;
+      if(pl > 1.3){ monitorFlag=true; stepState[0]=2; }
+      if(pl > 1.9) finalState=2;
+    }
+
+    // ---- pass banner ----
+    text(noControl ? "Pass A: no control (0% audit budget)" : "Pass B: modest control (2% audit budget)",
+         960, 172, {size:30, weight:800, color: noControl?"#ff8a6a":COL.teal, align:"center"});
+
+    // ---- trusted monitor above step 1 ----
+    const mcx = gStepX(0)+GBW/2;
+    ctx.save();
+    if(monitorFlag){ ctx.shadowColor="rgba(45,212,191,0.6)"; ctx.shadowBlur=16; }
+    ctx.fillStyle= monitorFlag?"rgba(12,36,34,0.85)":"rgba(18,30,40,0.85)";
+    ctx.strokeStyle= monitorFlag?COL.teal:"#3a6f5f"; ctx.lineWidth=2.5;
+    roundRect(mcx-134, 250, 268, 80, 12); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    text("Trusted monitor", mcx, 284, {size:22, weight:800, color: monitorFlag?COL.teal:COL.ink, align:"center"});
+    text(monitorFlag ? "flags credential harvest (~74% block)" : "watching step 1  (~74% block at 2%)",
+         mcx, 312, {size:16, weight:500, color:COL.ink2, align:"center"});
+    ctx.save();
+    ctx.strokeStyle= monitorFlag?COL.teal:"#3a6f5f"; ctx.lineWidth=3; ctx.setLineDash(monitorFlag?[]:[4,6]);
+    ctx.beginPath(); ctx.moveTo(mcx,330); ctx.lineTo(mcx,GBY); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+
+    // ---- chain step boxes ----
+    for(let i=0;i<4;i++){
+      const x=gStepX(i), y=GBY, w=GBW, h=GBH, st=stepState[i];
+      let bord,fill,tcol,sub2,subcol;
+      if(st===2){ bord=COL.teal; fill="rgba(12,38,34,0.75)"; tcol="#bdeee6"; sub2="blocked by monitor"; subcol=COL.teal; }
+      else if(st===1){ bord="#ff5d73"; fill="rgba(52,18,22,0.6)"; tcol="#ffd3d9"; sub2=G_STEPS[i].s; subcol=COL.ink2; }
+      else { bord="#2a3a52"; fill="rgba(18,24,34,0.55)"; tcol=COL.dim; sub2=G_STEPS[i].s; subcol=COL.dim; }
+      ctx.save();
+      if(st===1){ ctx.shadowColor="rgba(255,93,115,"+(0.35+0.4*pulse).toFixed(3)+")"; ctx.shadowBlur=18; }
+      else if(st===2){ ctx.shadowColor="rgba(45,212,191,"+(0.35+0.4*pulse).toFixed(3)+")"; ctx.shadowBlur=16; }
+      ctx.fillStyle=fill; ctx.strokeStyle=bord; ctx.lineWidth=2.5; roundRect(x,y,w,h,12); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      const tl = wrap(G_STEPS[i].t, w-34, "800 24px system-ui, Arial, sans-serif");
+      let ty=y+ (tl.length>1?44:58);
+      for(const ln of tl){ text(ln, x+w/2, ty, {size:24, weight:800, color:tcol, align:"center"}); ty+=28; }
+      text(sub2, x+w/2, y+h-24, {size:19, weight: st===2?800:500, color:subcol, align:"center"});
+    }
+
+    // ---- arrows between steps (and into the final state) ----
+    for(let i=0;i<4;i++){
+      const x1=gStepX(i)+GBW, x2=gStepX(i+1), ym=GBY+GBH/2;
+      const stopped = !noControl && i===0 && monitorFlag;   // chain stops at step 1 under control
+      if(stopped){
+        ctx.save(); ctx.strokeStyle="#ff5d73"; ctx.lineWidth=4; const cm=(x1+x2)/2;
+        ctx.beginPath(); ctx.moveTo(cm-13,ym-13); ctx.lineTo(cm+13,ym+13); ctx.moveTo(cm+13,ym-13); ctx.lineTo(cm-13,ym+13); ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+      if(!noControl && i>0) continue;   // under control, later arrows never appear
+      ctx.save();
+      const on=arrowOn[i];
+      ctx.strokeStyle = on?"#ff7a1a":"#2a3a52"; ctx.fillStyle = on?"#ff7a1a":"#2a3a52"; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(x1+6,ym); ctx.lineTo(x2-16,ym); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x2-6,ym); ctx.lineTo(x2-20,ym-9); ctx.lineTo(x2-20,ym+9); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
+    // ---- final state box ----
+    {
+      const x=gStepX(4), y=GBY, w=GBW, h=GBH;
+      let bord,fill,tcol,sub2,subcol;
+      if(finalState===1){ bord="#ff5d73"; fill="rgba(70,16,22,0.82)"; tcol="#ffd3d9"; sub2="BREACHED"; subcol="#ff5d73"; }
+      else if(finalState===2){ bord=COL.teal; fill="rgba(12,40,36,0.82)"; tcol="#bdeee6"; sub2="breach prevented"; subcol=COL.teal; }
+      else { bord="#2a3a52"; fill="rgba(18,24,34,0.55)"; tcol=COL.dim; sub2="target"; subcol=COL.dim; }
+      ctx.save();
+      if(finalState===1){ ctx.shadowColor="rgba(255,93,115,"+(0.4+0.4*pulse).toFixed(3)+")"; ctx.shadowBlur=22; }
+      else if(finalState===2){ ctx.shadowColor="rgba(45,212,191,"+(0.4+0.4*pulse).toFixed(3)+")"; ctx.shadowBlur=18; }
+      ctx.fillStyle=fill; ctx.strokeStyle=bord; ctx.lineWidth=2.5; roundRect(x,y,w,h,12); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      text("Hugging Face", x+w/2, y+66, {size:25, weight:800, color:tcol, align:"center"});
+      text(sub2, x+w/2, y+h-24, {size:21, weight:800, color:subcol, align:"center"});
+    }
+
+    // ---- outcome banner ----
+    if(finalState===1) text("Every step proceeded. Breach.", 960, 648, {size:30, weight:800, color:"#ff5d73", align:"center"});
+    else if(finalState===2) text("Chain broken at step 1. Breach prevented.", 960, 648, {size:30, weight:800, color:COL.teal, align:"center"});
+
+    // ---- documented-facts panel (real incident kept, but the simulation is the focus) ----
+    const fw=800, fx=960-fw/2, fyb=700, fh=108;
+    ctx.save();
+    ctx.fillStyle="rgba(14,20,30,0.85)"; ctx.strokeStyle="#5a3c0b"; ctx.lineWidth=1.5;
+    roundRect(fx,fyb,fw,fh,14); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    text("The chain above is the documented real incident", 960, fyb+42, {size:22, weight:800, color:COL.amber, align:"center"});
+    text(G_FACTSTR, 960, fyb+78, {size:21, weight:500, color:COL.ink, align:"center"});
+
+    // ---- honest provenance line ----
+    text("Chain: public Swarm Traces incident.   Block rate ~74%: our measured transfer check (Appendix D).",
+         960, 962, {size:20, weight:600, color:"#cdb98a", align:"center"});
+  }
+
+  /* ---------- progress timeline (bottom) ---------- */
+  function drawTimeline(t){
+    const y=1048, x0=80, x1=1840, wln=x1-x0;
+    ctx.save();
+    ctx.strokeStyle="#1e2a3c"; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
+    for(const s of SCENES){
+      const sx = x0 + (s.start/LOOP)*wln;
+      ctx.fillStyle="#33455f"; circle(sx,y,4); ctx.fill();
+      text(s.short||s.title, sx, y-14, {size:16, color:"#5b6c84"});
+    }
+    const px = x0 + (t/LOOP)*wln;
+    ctx.strokeStyle=COL.teal; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(px,y); ctx.stroke();
+    ctx.fillStyle=COL.teal; circle(px,y,6); ctx.fill();
+    ctx.restore();
+  }
+
+  /* ---------- main update + render ---------- */
+  function updateCovers(dt){
+    const sc = sceneAt(state.t);
+    // scene-change resets so each pass re-animates from empty
+    if(lastScene!==sc.id){
+      if(sc.id==="B") audit.coverB = 0;
+      if(sc.id==="C"){ audit.coverL = 0; audit.coverR = 0; }
+      if(sc.id==="A"){ particles.length = 0; for(const a of agents) a.acc = Math.random()*0.2; }
+      lastScene = sc.id;
+    }
+    // targets
+    let tgtB=0, tgtL=0, tgtR=0;
+    if(sc.id==="B"){
+      const idx = budgetIndexFor("B", state.t - sc.start);
+      tgtB = idx<0 ? 0 : (100 - UNCAUGHT_CORR[idx]);
+    }
+    if(sc.id==="C"){
+      const idx = budgetIndexFor("C", state.t - sc.start);
+      tgtL = 100 - UNCAUGHT_INDEP[idx];
+      tgtR = 100 - UNCAUGHT_CORR[idx];
+    }
+    const k = Math.min(1, dt*3.2);
+    audit.coverB += (tgtB - audit.coverB)*k;
+    audit.coverL += (tgtL - audit.coverL)*k;
+    audit.coverR += (tgtR - audit.coverR)*k;
+  }
+
+  function render(){
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0,0,W,H);
+    // faint vignette
+    const g = ctx.createRadialGradient(W/2,H/2,200,W/2,H/2,1200);
+    g.addColorStop(0,"rgba(255,255,255,0.02)");
+    g.addColorStop(1,"rgba(0,0,0,0.35)");
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    const sc = sceneAt(state.t);
+    const localT = state.t - sc.start;
+
+    if(sc.id==="A"){ renderA(localT, 1, true); drawHeader(sc, localT); }
+    else if(sc.id==="F"){ renderF(localT); drawHeader(sc, localT); }
+    else if(sc.id==="B"){ renderB(localT); drawHeader(sc, localT); }
+    else if(sc.id==="C"){ renderC(localT); drawHeader(sc, localT); }
+    else if(sc.id==="E"){ renderE(localT); drawHeader(sc, localT); }
+    else if(sc.id==="G"){ renderG(localT); drawHeader(sc, localT); }
+    else { renderD(localT); }
+
+    // clean fade-from-black at the start of every scene (no stale content bleeds between scenes)
+    const fb = clamp(1 - localT/0.5, 0, 1)*0.82;
+    if(fb>0.001){ ctx.save(); ctx.globalAlpha=fb; ctx.fillStyle="#05080c"; ctx.fillRect(0,0,W,H); ctx.restore(); }
+
+    drawTimeline(state.t);
+    drawWatermark();   // ALWAYS last => present on every frame
+  }
+
+  function frame(now){
+    let dt = (now - lastNow)/1000;
+    lastNow = now;
+    if(dt>0.05) dt = 0.05;
+    if(state.playing){
+      state.t += dt;
+      if(state.t >= LOOP) state.t -= LOOP;
+      updateParticles(dt, sceneAt(state.t).id==="A");
+    }
+    updateCovers(state.playing?dt:0.0001);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- controls ---------- */
+  const pp = document.getElementById("pp");
+  const bval = document.getElementById("bval");
+  const bauto = document.getElementById("bauto");
+  function updateBar(){
+    pp.textContent = state.playing ? "Pause" : "Play";
+    if(state.manualBudget==null){ bval.textContent="auto"; bauto.classList.add("active"); }
+    else { bval.textContent = BUDGETS[state.manualBudget]+"% (manual)"; bauto.classList.remove("active"); }
+  }
+  pp.onclick = ()=>{ state.playing=!state.playing; updateBar(); };
+  document.getElementById("restart").onclick = ()=>{
+    state.t=0; particles.length=0; audit.coverB=audit.coverL=audit.coverR=0;
+    lastScene=null; state.manualBudget=null; updateBar();
+  };
+  function setManual(i){
+    state.manualBudget = clamp(i,0,5);
+    const sc = sceneAt(state.t);
+    if(sc.id!=="B" && sc.id!=="C"){ state.t = 52.0; lastScene=null; } // jump into Shadow panel where budget applies
+    updateBar();
+  }
+  document.getElementById("bprev").onclick = ()=> setManual((state.manualBudget==null?0:state.manualBudget)-1);
+  document.getElementById("bnext").onclick = ()=> setManual((state.manualBudget==null?0:state.manualBudget)+1);
+  bauto.onclick = ()=>{ state.manualBudget=null; updateBar(); };
+  document.querySelectorAll("#bar button[data-scene]").forEach(btn=>{
+    btn.onclick = ()=>{ state.t = SCENES[+btn.dataset.scene].start + 0.01; lastScene=null; };
+  });
+  window.addEventListener("keydown", (e)=>{
+    if(e.code==="Space"){ e.preventDefault(); state.playing=!state.playing; updateBar(); }
+    else if(e.key==="r"||e.key==="R"){ state.t=0; particles.length=0; audit.coverB=audit.coverL=audit.coverR=0; lastScene=null; state.manualBudget=null; updateBar(); }
+    else if(e.key==="ArrowRight"){ setManual((state.manualBudget==null?0:state.manualBudget)+1); }
+    else if(e.key==="ArrowLeft"){ setManual((state.manualBudget==null?0:state.manualBudget)-1); }
+    else if(e.key==="a"||e.key==="A"){ state.manualBudget=null; updateBar(); }
+    else if(e.key>="1"&&e.key<="7"){ state.t = SCENES[+e.key-1].start + 0.01; lastScene=null; }
+  });
+
+  updateBar();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

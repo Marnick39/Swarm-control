@@ -1,0 +1,11 @@
+category,payload_count,pct_of_payloads
+Data exfiltration,11301,12.4
+Credential use/theft,25971,28.5
+Remote code load / injection,17829,19.6
+Controller check-in (C2),6888,7.6
+Cache poisoning,3769,4.1
+Trace / log removal,278,0.3
+Recon / search,17958,19.7
+Model / data target,18081,19.9
+TOTAL_payloads,91037,100.0
+matched_any,46438,51.0

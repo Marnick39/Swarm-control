@@ -63,15 +63,16 @@ Push this repo to GitHub, then let Cloudflare Pages watch it.
 ```bash
 # one-time auth (interactive, run it yourself):  ! gh auth login
 cd ~/workspace/sim-ng
-gh repo create sim-ng --private --source=. --remote=origin --push
+gh repo create Swarm-control --private --source=. --remote=origin --push
 ```
 
 That creates the repo, wires the remote, and pushes `main` in one step.
+(Live repo: https://github.com/Marnick39/Swarm-control)
 
 Then in Cloudflare:
 
 1. Workers and Pages, then Create, then Pages, then **Connect to Git**, authorize
-   GitHub, and pick `sim-ng`.
+   GitHub, and pick `Swarm-control`.
 2. Production branch: `main`. Framework preset: **None**.
 3. Build command: `bash scripts/prepare_publish.sh`
 4. Build output directory: `dist`

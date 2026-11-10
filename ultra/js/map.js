@@ -12,6 +12,14 @@ SU.map = (function () {
   let B, state, handlers, svg, root, layers, centers = {}, agentById = {};
   let tr = { x: 0, y: 0, s: 1 };
   let drag = null;
+  let pulseEls = {}, ambientTimer = null;
+
+  function districtColorForNode(id) {
+    const c = B.world.cells.find((x) => x.id === id);
+    if (!c) return "var(--activity)";
+    const d = B.world.districts.find((x) => x.owner === c.owner);
+    return d ? d.color : "var(--activity)";
+  }
 
   function cellCenter(c) {
     const p = SU.hex.toPixel(c.q, c.r, B.world.hex_size);
@@ -40,6 +48,7 @@ SU.map = (function () {
     drawCells();
     bindInput();
     fit();
+    startAmbient();
     return API;
   }
 
@@ -148,7 +157,8 @@ SU.map = (function () {
   }
 
   function drawCells() {
-    B.world.cells.forEach((c) => {
+    pulseEls = {};
+    B.world.cells.forEach((c, i) => {
       const p = centers[c.id];
       const grp = el("g", {
         transform: `translate(${p.x},${p.y})`, class: "cell",
@@ -162,8 +172,21 @@ SU.map = (function () {
         "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke",
         opacity: "0",
       }));
-      // building
+      // breathing activity ring: wrapper opacity is gated by activity, the
+      // inner ring runs the looping pulse animation (scale + fade).
+      const pwrap = el("g", { class: "pulsewrap", opacity: "0" });
+      const pr = el("circle", {
+        class: "pulse", cx: 0, cy: 0, r: (28 + c.size * 16).toFixed(0),
+        fill: "none", stroke: "var(--activity)", "stroke-width": "2.5",
+        "vector-effect": "non-scaling-stroke",
+      });
+      pr.style.animationDelay = (i * 0.17).toFixed(2) + "s";
+      pwrap.appendChild(pr);
+      grp.appendChild(pwrap);
+      pulseEls[c.id] = pwrap;
+      // building (rises in on load, staggered)
       const b = el("g", { class: "bwrap" });
+      b.style.animationDelay = (0.05 * i).toFixed(2) + "s";
       b.innerHTML = SU.building.make(c.kind, c.size);
       grp.appendChild(b);
 
@@ -270,21 +293,68 @@ SU.map = (function () {
 
   // ------------------------------------------------------------- tick FX
   function setTick(t, budgetIdx) {
-    // pulse active frontier nodes; show blocked ratio ring
-    const acts = B.timeline.acts.filter((a) => a.t === t);
-    const byNode = {};
-    acts.forEach((a) => { byNode[a.node] = (byNode[a.node] || 0) + 1; });
-    layers.fx.querySelectorAll(".tick-fx").forEach((n) => n.remove());
-    Object.keys(byNode).forEach((nid) => {
-      const p = centers[nid]; if (!p) return;
-      const n = byNode[nid];
-      const ring = el("circle", {
-        cx: p.x, cy: p.y, r: 14 + Math.min(26, n * 3),
-        fill: "none", stroke: "var(--activity)", "stroke-width": "2",
-        opacity: "0.5", class: "tick-fx", "vector-effect": "non-scaling-stroke",
-      });
-      layers.fx.appendChild(ring);
+    // breathing rings reflect activity in a short window around the tick
+    const W = 5;
+    const count = {};
+    B.timeline.acts.forEach((a) => {
+      if (a.t <= t && a.t > t - W) count[a.node] = (count[a.node] || 0) + 1;
     });
+    B.world.cells.forEach((c) => {
+      const pr = pulseEls[c.id]; if (!pr) return;
+      const reached = c.tick <= t;
+      const n = reached ? (count[c.id] || 0) : 0;
+      pr.setAttribute("opacity", n ? Math.min(0.85, 0.28 + n * 0.11).toFixed(2) : "0");
+      // dim buildings not yet reached when scrubbing mid-run
+      const g = layers.bldg.querySelector(`.cell[data-id="${c.id}"]`);
+      if (g && t < B.timeline.ticks) g.style.opacity = reached ? "1" : "0.28";
+      else if (g) g.style.opacity = "1";
+    });
+  }
+
+  // ------------------------------------------------- act-dots flowing on edges
+  function emitDot(fromId, toId, kind, color) {
+    const a = centers[fromId], b = centers[toId];
+    if (!a || !b) return;
+    let path;
+    if (kind === "msg") {
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 70;
+      path = `M${a.x} ${a.y} Q${mx} ${my} ${b.x} ${b.y}`;
+    } else path = `M${a.x} ${a.y} L${b.x} ${b.y}`;
+    const dot = el("circle", {
+      r: "3.4", fill: color || "var(--activity)", class: "flowdot",
+      opacity: "0.95", "vector-effect": "non-scaling-stroke",
+    });
+    const anim = document.createElementNS(NS, "animateMotion");
+    anim.setAttribute("dur", (1.0 + Math.random() * 0.7).toFixed(2) + "s");
+    anim.setAttribute("path", path);
+    anim.setAttribute("fill", "remove");
+    anim.setAttribute("calcMode", "spline");
+    anim.setAttribute("keyTimes", "0;1");
+    anim.setAttribute("keySplines", "0.4 0 0.2 1");
+    dot.appendChild(anim);
+    layers.fx.appendChild(dot);
+    try { if (anim.beginElement) anim.beginElement(); } catch (e) {}
+    setTimeout(() => dot.remove(), 2000);
+  }
+
+  function startAmbient() {
+    if (ambientTimer) clearInterval(ambientTimer);
+    ambientTimer = setInterval(() => {
+      if (document.hidden || state.view !== "map") return;
+      if (layers.fx.querySelectorAll(".flowdot").length > 22) return;
+      const t = state.tick;
+      const cand = B.world.edges.filter((e) => {
+        const f = B.world.cells.find((c) => c.id === e.from);
+        const to = B.world.cells.find((c) => c.id === e.to);
+        return f && to && f.tick <= t && to.tick <= t;
+      });
+      if (!cand.length) return;
+      const n = 1 + (Math.random() < 0.45 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        const e = cand[(Math.random() * cand.length) | 0];
+        emitDot(e.from, e.to, e.kind, districtColorForNode(e.from));
+      }
+    }, 340);
   }
 
   // ------------------------------------------------------------- hover

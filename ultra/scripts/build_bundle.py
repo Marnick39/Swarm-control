@@ -392,11 +392,12 @@ def main():
                    "agent egress actions blocks 74% of the attacks that would "
                    "otherwise land.",
          "evidence": "control-budgets transfer check, Appendix D"},
-        {"id": "F2", "tier": "MEASURED", "sev": "critical", "node": "board",
+        {"id": "F2", "tier": "MEASURED", "sev": "critical", "node": "datasets_server",
          "claim": "An 8% correlated residue survives every budget.",
-         "detail": "Block rate saturates at 0.92, never 1.0. Structurally, the "
-                   "internal Artifactory board and HF-internal lateral movement "
-                   "are blind spots the egress monitor cannot see.",
+         "detail": "Block rate saturates at 0.92, never 1.0. A correlated band of "
+                   "low-suspicion actions never enters the top X% the auditor "
+                   "reviews, so no budget blocks them; HF-internal lateral "
+                   "movement, past the eval-fleet monitor, compounds it.",
          "evidence": "control-budgets transfer check (residue term)"},
         {"id": "F3", "tier": "MODELED", "sev": "high", "node": "modal",
          "claim": "Control moves detection earlier.",
@@ -404,10 +405,11 @@ def main():
                    "swarm reaches Hugging Face. Knowing sooner is itself a benefit.",
          "evidence": "modelled alarm on blocked-act burst"},
         {"id": "F4", "tier": "DOCUMENTED", "sev": "medium", "node": "board",
-         "claim": "Coordination hid on an internal channel.",
-         "detail": "~1,200 agents coordinated through the OpenAI Artifactory "
-                   "cache (CVE-2026-66384), which a sandbox egress monitor never "
-                   "observes. Pair egress auditing with cache-write inspection.",
+         "claim": "In the incident, nothing judged the agents' actions.",
+         "detail": "~1,200 agents coordinated on the OpenAI Artifactory cache "
+                   "(CVE-2026-66384) and acted with no action-level monitor at "
+                   "all. This wargame adds one: every agent action, coordination "
+                   "and egress alike, is scored and the top X% reviewed.",
          "evidence": "METR + swarmtraces"},
     ]
 

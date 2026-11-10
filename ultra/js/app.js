@@ -226,8 +226,8 @@ SU.app = (function () {
     if ($("mw-blocked")) $("mw-blocked").textContent = Math.round(frac * 100) + "%";
     if ($("mw-monitors")) $("mw-monitors").textContent = lit + "/" + slots;
     if ($("mw-note")) $("mw-note").innerHTML =
-      budget === 0 ? "No monitors on the gate &mdash; every egress attack lands." :
-      `${lit} monitor${lit > 1 ? "s" : ""} staffing the gate. The internal board and HF-internal lateral movement stay <b>unmonitored</b>.`;
+      budget === 0 ? "No monitors staffed &mdash; every agent action is allowed through." :
+      `${lit}/${slots} monitors review the top-suspicion agent actions. HF-internal lateral movement stays <b>unmonitored</b>.`;
     updateLiveTally();
   }
   function updateLiveTally() {

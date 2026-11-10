@@ -23,14 +23,17 @@ SU.map = (function () {
   let tr = { x: 0, y: 0, s: 1 }, drag = null;
   let boltTimer = null, blockThreshold = 1.1, sortedSusp = [];
   let tally = { blocked: 0, passed: 0, blind: 0 };
-  let gateNodes = [], gateG;
+  let gateNodes = [], gateG, litGateNodes = [];
 
-  // --- OpenAI network region (contains the swarm, the board and the gate) ---
-  const OPENAI = { x0: -1200, y0: -470, x1: -150, y1: 430 };
-  const FLEET = { cx: -800, cy: 120, rx: 300, ry: 250 };
-  const BOARD = { x: -830, y: -235 };
-  const GATE = { x: -270, y: -10 };
-  const MODAL = { x: 90, y: 80 };
+  // --- OpenAI network region (swarm | monitor gate | internal Artifactory) ---
+  // the gate sits between the swarm and everything it does: the internal board
+  // AND the egress to the internet. Every agent action is judged there.
+  const OPENAI = { x0: -1280, y0: -470, x1: -120, y1: 450 };
+  const FLEET = { cx: -980, cy: 70, rx: 235, ry: 270 };
+  const GATE = { x: -600, y: 70 };
+  const GATE_SPAN = 480;
+  const BOARD = { x: -320, y: -275 };
+  const MODAL = { x: 130, y: 120 };
   const MON_SLOTS = 14;
   const MON_COUNT = [0, 1, 2, 5, 7, 10, 14];
   // external islands (open internet)
@@ -115,10 +118,9 @@ SU.map = (function () {
     }
 
     gateNodes = [];
-    const span = 360;
     for (let i = 0; i < MON_SLOTS; i++) {
       const t = i / (MON_SLOTS - 1);
-      gateNodes.push({ x: GATE.x + (i % 2 ? 22 : -22), y: GATE.y - span / 2 + t * span });
+      gateNodes.push({ x: GATE.x + (i % 2 ? 22 : -22), y: GATE.y - GATE_SPAN / 2 + t * GATE_SPAN });
     }
   }
 
@@ -157,12 +159,13 @@ SU.map = (function () {
       x: r.x0 + 30, y: r.y0 + 66, "font-size": "13", fill: "var(--text-muted)",
       "font-family": "var(--font-mono)",
     }, "eval fleet · internal Artifactory · egress monitor — one trust zone"));
-    // "egress boundary" tick near the gate
+    // egress boundary at the region's right edge (OpenAI -> open internet)
+    const my = (r.y0 + r.y1) / 2;
     layers.label.appendChild(el("text", {
-      x: GATE.x, y: r.y1 - 16, "text-anchor": "middle", "font-size": "11.5",
-      fill: OPENAI_COLOR, "fill-opacity": "0.8", "font-family": "var(--font-mono)",
-      "letter-spacing": "0.08em",
-    }, "↓ egress boundary ↓"));
+      x: r.x1 - 13, y: my, "text-anchor": "middle", "font-size": "11.5",
+      fill: OPENAI_COLOR, "fill-opacity": "0.75", "font-family": "var(--font-mono)",
+      "letter-spacing": "0.08em", transform: `rotate(90 ${r.x1 - 13} ${my})`,
+    }, "OpenAI → internet egress"));
   }
 
   // ------------------------------------------------- external islands
@@ -221,19 +224,20 @@ SU.map = (function () {
 
   // ------------------------------------------------- lanes
   function drawLanes() {
-    // internal coordination: swarm -> board (short, inside OpenAI, unmonitored)
-    lane(FLEET.cx, FLEET.cy - 40, BOARD.x + 40, BOARD.y + 60, "7 6", 0.5, "var(--ink-soft)");
-    layers.lane.appendChild(el("text", { x: (FLEET.cx + BOARD.x) / 2 - 40, y: (FLEET.cy + BOARD.y) / 2,
-      "font-size": "11", fill: "var(--text-muted)", "font-family": "var(--font-mono)", opacity: "0.8",
-      "text-anchor": "middle" }, "internal · unmonitored"));
-    // egress: swarm front -> gate -> modal -> internet
-    const egX = FLEET.cx + FLEET.rx * 0.82 + 50;
-    lane(egX, FLEET.cy, GATE.x, GATE.y, "6 0", 0.5, "var(--ink-line)");
+    const sx = FLEET.cx + FLEET.rx + 18;   // swarm's right edge
+    // every agent action flows to the gate to be judged
+    lane(sx, FLEET.cy, GATE.x, GATE.y, "6 0", 0.5, "var(--ink-line)");
+    // monitored coordination: gate -> internal Artifactory board
+    lane(GATE.x, GATE.y, BOARD.x - 10, BOARD.y + 45, "2 7", 0.45, "var(--ink-soft)");
+    // egress: gate -> modal breakout -> internet
     lane(GATE.x, GATE.y, MODAL.x, MODAL.y, "2 7", 0.5, "var(--ink-line)");
     ["hf", "ext"].forEach((seg) => { const a = SEG[seg].anchor; lane(MODAL.x, MODAL.y, a.x, a.y, "2 7", 0.32, "var(--ink-line)"); });
-    layers.lane.appendChild(el("text", { x: (egX + GATE.x) / 2, y: GATE.y - 196,
+    layers.lane.appendChild(el("text", { x: (sx + GATE.x) / 2, y: GATE.y - 205,
       "text-anchor": "middle", "font-size": "11.5", fill: "var(--text-muted)",
-      "font-family": "var(--font-mono)", opacity: "0.85" }, "agent egress"));
+      "font-family": "var(--font-mono)", opacity: "0.85" }, "every agent action → judged"));
+    layers.lane.appendChild(el("text", { x: (GATE.x + BOARD.x) / 2, y: (GATE.y + BOARD.y) / 2 - 8,
+      "text-anchor": "middle", "font-size": "10.5", fill: "var(--text-muted)",
+      "font-family": "var(--font-mono)", opacity: "0.75" }, "coordination"));
   }
   function lane(x1, y1, x2, y2, dash, op, col) {
     layers.lane.appendChild(el("path", { d: `M${x1} ${y1} L${x2} ${y2}`, fill: "none",
@@ -294,22 +298,24 @@ SU.map = (function () {
   // ------------------------------------------------- gate
   function drawGate() {
     gateG = el("g"); layers.gate.appendChild(gateG); renderGate(state.budgetIdx);
-    layers.gate.appendChild(el("text", { id: "gate-label", x: GATE.x, y: GATE.y - 212,
+    layers.gate.appendChild(el("text", { id: "gate-label", x: GATE.x, y: GATE.y - GATE_SPAN / 2 - 30,
       "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: "var(--select)",
       "font-family": "var(--font-sans)", "letter-spacing": "0.06em" }, "MONITOR GATE"));
-    layers.gate.appendChild(el("text", { id: "gate-sub", x: GATE.x, y: GATE.y - 193,
+    layers.gate.appendChild(el("text", { id: "gate-sub", x: GATE.x, y: GATE.y - GATE_SPAN / 2 - 11,
       "text-anchor": "middle", "font-size": "12", fill: "var(--text-muted)",
       "font-family": "var(--font-mono)" }, ""));
   }
   function renderGate(bi) {
     gateG.innerHTML = "";
-    const lit = MON_COUNT[bi] || 0, span = 360;
+    const lit = MON_COUNT[bi] || 0, span = GATE_SPAN;
+    const litSet = new Set(litIndices(bi));
+    litGateNodes = gateNodes.filter((n, i) => litSet.has(i));
     gateG.appendChild(el("rect", { x: GATE.x - 38, y: GATE.y - span / 2 - 12, width: 76, height: span + 24, rx: 22,
       fill: "var(--select)", "fill-opacity": (0.03 + lit / MON_SLOTS * 0.08).toFixed(3),
       stroke: "var(--select-line)", "stroke-opacity": "0.4", "stroke-width": "1",
       "stroke-dasharray": "3 4", "vector-effect": "non-scaling-stroke" }));
     gateNodes.forEach((n, i) => {
-      const on = i < lit;
+      const on = litSet.has(i);
       const g = el("g", { transform: `translate(${n.x},${n.y})` });
       g.appendChild(el("circle", { r: on ? 10 : 7, fill: on ? "var(--select)" : "var(--surface)",
         stroke: on ? "var(--select-line)" : "var(--ink-line)", "stroke-width": "1.5",
@@ -382,20 +388,21 @@ SU.map = (function () {
   }
 
   // ------------------------------------------------- bolts
-  function nearestGate(y) { let g = gateNodes[0], best = 1e9; gateNodes.forEach((n) => { const d = Math.abs(n.y - y); if (d < best) { best = d; g = n; } }); return g; }
-  function routeFor(act, origin) {
-    const node = cellById[act.node]; if (!node) return null;
-    const tgt = centers[act.node]; if (!tgt) return null;
-    const beach = centers["datasets_server"];
-    const route = node.route;
-    if (route === "internal") return { pts: [origin, centers["board"]], gated: false, kind: "internal" };
-    if (route === "lateral") return { pts: [beach, tgt], gated: false, kind: "lateral" };
-    if (node.seg === "ext" && node.stage === "Exfiltration") return { pts: [beach, tgt], gated: false, kind: "exfil" };
-    const g = nearestGate(origin.y);
-    const pts = [{ x: origin.x, y: origin.y }, { x: g.x, y: g.y }];
-    if (act.node !== "modal") pts.push(centers["modal"]);
-    pts.push(tgt);
-    return { pts, gated: true, gate: g, kind: "egress" };
+  // which gate slots are STAFFED, spread evenly across the wall (not clustered)
+  function litIndices(bi) {
+    const L = MON_COUNT[bi] || 0, M = MON_SLOTS;
+    if (L <= 0) return [];
+    if (L >= M) return [...Array(M).keys()];
+    const set = new Set();
+    for (let i = 0; i < L; i++) set.add(Math.max(0, Math.min(M - 1, Math.round((i + 0.5) * M / L - 0.5))));
+    return [...set];
+  }
+  // the nearest STAFFED monitor to an egress point, or null if a gap / none
+  function nearestLitGate(y) {
+    if (!litGateNodes.length) return null;
+    let g = null, best = 1e9;
+    litGateNodes.forEach((n) => { const d = Math.abs(n.y - y); if (d < best) { best = d; g = n; } });
+    return g;
   }
   function jitterPath(pts) {
     let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
@@ -408,18 +415,38 @@ SU.map = (function () {
   }
   function fireBolt(act) {
     if (layers.bolt.childElementCount > 46) return;
-    const node = cellById[act.node];
-    const fromHF = node.route === "lateral" || (node.seg === "ext" && node.stage === "Exfiltration");
+    const node = cellById[act.node]; if (!node) return;
+    const tgt = centers[act.node]; if (!tgt) return;
+    const kind = node.route === "internal" ? "internal"
+      : node.route === "lateral" ? "lateral"
+      : (node.seg === "ext" && node.stage === "Exfiltration") ? "exfil" : "egress";
     // every request launches from some agent in the swarm, in that agent's colour
     let origin, agentColor;
-    if (fromHF) { origin = centers["datasets_server"]; agentColor = "var(--activity)"; }
+    if (kind === "lateral" || kind === "exfil") { origin = centers["datasets_server"]; agentColor = "var(--activity)"; }
     else { const sp = swarmPts[(Math.random() * swarmPts.length) | 0]; origin = sp; agentColor = sp.color; }
-    const r = routeFor(act, origin); if (!r) return;
-    const blocked = r.gated && act.susp >= blockThreshold;
-    const color = (r.kind === "lateral" || r.kind === "exfil") ? "var(--activity)" : agentColor;
-    const pts = blocked ? r.pts.slice(0, 2) : r.pts;
-    const d = jitterPath(pts);
-    const muted = !r.gated;
+
+    // every agent action (board coordination + egress) is judged at the gate;
+    // the top X% by suspicion are reviewed and blocked. HF-internal lateral /
+    // exfil originate inside HF, past the eval-fleet monitor's reach (blind).
+    const agentAction = kind === "internal" || kind === "egress";
+    const blocked = agentAction && act.susp >= blockThreshold;
+    let pts, gate = null;
+    if (kind === "lateral" || kind === "exfil") {
+      pts = [centers["datasets_server"], tgt];
+    } else if (blocked) {
+      // a reviewed-and-blocked action stops at the staffed monitor that caught it
+      gate = nearestLitGate(origin.y) || { x: GATE.x, y: origin.y };
+      pts = [{ x: origin.x, y: origin.y }, { x: gate.x, y: gate.y }];
+    } else {
+      // judged and allowed: it crosses the gate wall and continues
+      pts = [{ x: origin.x, y: origin.y }, { x: GATE.x, y: origin.y }];
+      if (kind === "internal") pts.push(centers["board"]);
+      else { if (act.node !== "modal") pts.push(centers["modal"]); pts.push(tgt); }
+    }
+    const color = (kind === "lateral" || kind === "exfil") ? "var(--activity)" : agentColor;
+    const drawPts = pts;
+    const d = jitterPath(drawPts);
+    const muted = kind === "lateral" || kind === "exfil";
     const path = el("path", { d, fill: "none", stroke: blocked ? "var(--alert)" : color,
       "stroke-width": blocked ? "2.2" : (muted ? "1.8" : "2.6"), "stroke-linecap": "round",
       "stroke-linejoin": "round", class: "bolt", opacity: muted ? "0.6" : "0.92",
@@ -436,10 +463,11 @@ SU.map = (function () {
     try { anim.beginElement && anim.beginElement(); } catch (e) {}
     setTimeout(() => {
       head.remove();
-      const end = pts[pts.length - 1];
+      const end = drawPts[drawPts.length - 1];
       burst(end.x, end.y, blocked ? "var(--alert)" : color, blocked);
-      if (blocked) { tally.blocked++; flashGate(r.gate); }
-      else if (r.gated) tally.passed++; else tally.blind++;
+      if (blocked) { tally.blocked++; flashGate(gate); }
+      else if (kind === "internal" || kind === "egress") tally.passed++;   // judged, allowed
+      else tally.blind++;                                                  // HF-internal: past the monitor
       path.style.transition = "opacity .5s"; path.style.opacity = "0";
       setTimeout(() => path.remove(), 520);
     }, dur * 1000);
@@ -482,7 +510,7 @@ SU.map = (function () {
   function setBudget(bi) {
     state.budgetIdx = bi;
     const frac = B.control.blocks[bi], n = sortedSusp.length;
-    blockThreshold = n ? sortedSusp[Math.min(n - 1, Math.floor((1 - frac) * n))] : 1.1;
+    blockThreshold = (frac <= 0 || !n) ? Infinity : sortedSusp[Math.min(n - 1, Math.floor((1 - frac) * n))];
     if (gateG) renderGate(bi);
     const sub = document.getElementById("gate-sub");
     if (sub) sub.textContent = `${B.control.budgets[bi]}% audited · ${Math.round(frac * 100)}% blocked`;

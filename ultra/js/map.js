@@ -186,7 +186,8 @@ SU.map = (function () {
       "stroke-linecap": "round", opacity: op, "vector-effect": "non-scaling-stroke" }));
   }
 
-  // persistent service-to-service graph, styled by confidence
+  function nodeRadius(id) { const c = cellById[id]; return (id === "modal" ? 60 : SEG[c.seg].hexSize) * 0.56; }
+  // persistent service-to-service graph, styled by confidence, with direction arrows
   function drawEdges() {
     const show = { reach: 1, lateral: 1, c2: 1, exfil: 1, supply: 1, cred: 1 };
     B.world.edges.forEach((e) => {
@@ -194,15 +195,30 @@ SU.map = (function () {
       const a = centers[e.from], b = centers[e.to];
       if (!a || !b) return;
       const dash = e.conf === "confirmed" ? "none" : e.conf === "likely" ? "6 6" : "2 7";
-      const op = e.conf === "confirmed" ? 0.42 : e.conf === "likely" ? 0.36 : 0.3;
+      const op = e.conf === "confirmed" ? 0.5 : e.conf === "likely" ? 0.42 : 0.34;
       const col = (e.cls === "exfil" || e.cls === "c2" || e.cls === "supply")
         ? "var(--activity)" : (e.cls === "reach") ? "var(--alert)" : "var(--ink-soft)";
+      const reach = e.cls === "reach";
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 22;
+      // shorten the end to the node boundary so the arrow sits just outside it
+      const rad = nodeRadius(e.to);
+      const dx = b.x - mx, dy = b.y - my, dl = Math.hypot(dx, dy) || 1;
+      const ux = dx / dl, uy = dy / dl;
+      const ex = b.x - ux * rad, ey = b.y - uy * rad;
       layers.lane.appendChild(el("path", {
-        d: `M${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}`, fill: "none", stroke: col,
-        "stroke-width": e.cls === "reach" ? "1.8" : "1.4", "stroke-dasharray": dash,
+        d: `M${a.x} ${a.y} Q ${mx} ${my} ${ex.toFixed(1)} ${ey.toFixed(1)}`, fill: "none",
+        stroke: col, "stroke-width": reach ? "1.9" : "1.4", "stroke-dasharray": dash,
         opacity: op, "stroke-linecap": "round", "vector-effect": "non-scaling-stroke",
         class: "svc-edge",
+      }));
+      // arrowhead at the (shortened) end, oriented along the curve tangent
+      const s = reach ? 9 : 7;
+      const px = -uy, py = ux;   // perpendicular
+      layers.lane.appendChild(el("path", {
+        d: `M${ex.toFixed(1)} ${ey.toFixed(1)} ` +
+           `L${(ex - ux * s + px * s * 0.6).toFixed(1)} ${(ey - uy * s + py * s * 0.6).toFixed(1)} ` +
+           `L${(ex - ux * s - px * s * 0.6).toFixed(1)} ${(ey - uy * s - py * s * 0.6).toFixed(1)} Z`,
+        fill: col, opacity: Math.min(0.85, op + 0.2), class: "svc-edge",
       }));
     });
     // a small legend for confidence, in the sea under the gate

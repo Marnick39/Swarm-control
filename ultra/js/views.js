@@ -86,10 +86,10 @@ SU.views = (function () {
     stat.style.cssText = "display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px";
     [
       ["agents on the board", sw.board_total.toLocaleString()],
-      ["actively attacked HF", "~" + sw.attacked.toLocaleString()],
-      ["distinct secrets", sw.secrets],
-      ["recorded actions", sw.actions.toLocaleString()],
-      ["board messages", sw.messages.toLocaleString()],
+      ["went on to attack HF", "~" + sw.attacked.toLocaleString()],
+      ["peak concurrent (1 hr)", "~" + sw.peak_hour],
+      ["payloads decoded", sw.payloads_decoded.toLocaleString() + "+"],
+      ["board messages", sw.messages.toLocaleString() + "+"],
       ["tool-call spoofing", sw.spoof_pct + "%"],
     ].forEach(([k, v]) => {
       const c = H("div");

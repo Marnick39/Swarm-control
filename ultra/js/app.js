@@ -32,12 +32,13 @@ SU.app = (function () {
     rail.appendChild(H("div", "rail-sep"));
     NAV.forEach(([v, t]) => rail.appendChild(railBtn(iconFor(v), t, v)));
     rail.appendChild(H("div", "rail-sep"));
-    rail.appendChild(railBtn("guide", "Guide", null));
+    const guide = railBtn("guide", "Guide — tour the pieces", null);
+    guide.onclick = () => SU.tour && SU.tour.start(true);
+    rail.appendChild(guide);
     rail.appendChild(H("div", "rail-spacer"));
     const themeBtn = railBtn(state.theme === "dark" ? "moon" : "sun", "Theme", null);
     themeBtn.onclick = () => cycleTheme();
     rail.appendChild(themeBtn);
-    rail.appendChild(railBtn("signin", "Sign in", null));
   }
   function iconFor(v) {
     return { map: "map", agents: "agents", forge: "forge", eval: "eval", audit: "audit" }[v];
@@ -108,6 +109,7 @@ SU.app = (function () {
       $("view-" + v).classList.toggle("active", v === view);
     });
     $("backmap").classList.toggle("show", view !== "map");
+    $("monwidget").classList.toggle("hidden", view !== "map");
     if (view === "map") {
       panel.classList.remove("hidden");
       SU.panel.render();
@@ -185,9 +187,51 @@ SU.app = (function () {
     if (state.view === "forge") SU.views.render("forge", $("view-forge"));
   }
   function budgetChanged() {
-    SU.map.setTick(state.tick, state.budgetIdx);
+    SU.map.setBudget(state.budgetIdx);
+    SU.map.resetTally();
+    updateWidget();
     if (state.view === "audit") { SU.views.render("audit", $("view-audit")); renderViewPanel("audit"); }
     if (state.view === "forge") SU.views.render("forge", $("view-forge"));
+  }
+
+  // ------------------------------------------------------------- monitoring widget
+  function buildWidget() {
+    const w = $("monwidget");
+    w.innerHTML =
+      `<div class="mw-head"><span class="mw-dot"></span>MONITORING</div>` +
+      `<div class="mw-row"><span>Audit budget</span><span class="mono" id="mw-budget"></span></div>` +
+      `<input type="range" id="mw-slider" min="0" max="${B.control.budgets.length - 1}" step="1" value="${state.budgetIdx}">` +
+      `<div class="mw-ticks" id="mw-ticks"></div>` +
+      `<div class="mw-stats">` +
+      `  <div class="mw-stat"><div class="mw-v" id="mw-blocked"></div><div class="mw-k">blocked</div></div>` +
+      `  <div class="mw-stat"><div class="mw-v" id="mw-monitors"></div><div class="mw-k">monitors</div></div>` +
+      `  <div class="mw-stat"><div class="mw-v mono" id="mw-live"></div><div class="mw-k">caught · through</div></div>` +
+      `</div>` +
+      `<div class="mw-note" id="mw-note"></div>`;
+    const ticks = $("mw-ticks");
+    B.control.budgets.forEach((b) => { const s = document.createElement("span"); s.textContent = b + "%"; ticks.appendChild(s); });
+    $("mw-slider").oninput = (e) => { state.budgetIdx = +e.target.value; budgetChanged(); };
+    updateWidget();
+    if (widgetTimer) clearInterval(widgetTimer);
+    widgetTimer = setInterval(updateLiveTally, 900);
+  }
+  let widgetTimer = null;
+  function updateWidget() {
+    const bi = state.budgetIdx;
+    const budget = B.control.budgets[bi], frac = B.control.blocks[bi];
+    const lit = [0, 1, 2, 4, 6, 9, 12][bi];
+    if ($("mw-budget")) $("mw-budget").textContent = budget + "% of egress";
+    if ($("mw-slider")) $("mw-slider").value = bi;
+    if ($("mw-blocked")) $("mw-blocked").textContent = Math.round(frac * 100) + "%";
+    if ($("mw-monitors")) $("mw-monitors").textContent = lit + "/12";
+    if ($("mw-note")) $("mw-note").innerHTML =
+      budget === 0 ? "No monitors on the gate &mdash; every egress attack lands." :
+      `${lit} monitor${lit > 1 ? "s" : ""} staffing the gate. The internal board and HF-internal lateral movement stay <b>unmonitored</b>.`;
+    updateLiveTally();
+  }
+  function updateLiveTally() {
+    const t = SU.map.getTally ? SU.map.getTally() : { blocked: 0, passed: 0 };
+    if ($("mw-live")) $("mw-live").textContent = `${t.blocked} · ${t.passed}`;
   }
 
   // ------------------------------------------------------------- playback
@@ -239,14 +283,17 @@ SU.app = (function () {
       bundle: B, state, mount: $("map"),
       handlers: { onSelect: (id) => select(id) },
     });
-    buildRail(); buildToolbar(); applyTheme();
+    buildRail(); buildToolbar(); buildWidget(); applyTheme();
     $("backmap").onclick = () => go("map");
+    SU.map.setBudget(state.budgetIdx);
     SU.map.setTick(state.tick, state.budgetIdx);
     window.addEventListener("resize", () => SU.map.fit());
+    // tutorial on first load
+    if (SU.tour) { SU.tour.init({ state }); SU.tour.maybeFirstRun(); }
     // debug hook
     window.__sim = {
       ready: true, state,
-      go, select, seek, setTheme,
+      go, select, seek, setTheme, tour: () => SU.tour && SU.tour.start(true),
       setBudget: (i) => { state.budgetIdx = i; budgetChanged(); },
     };
   }

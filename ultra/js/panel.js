@@ -70,10 +70,10 @@ SU.panel = (function () {
     const kv = h("div", "kv");
     const rows = [
       ["agents on board", sw.board_total.toLocaleString()],
-      ["actively attacking", "~" + sw.attacked.toLocaleString()],
-      ["board messages", sw.messages.toLocaleString()],
-      ["secrets harvested", sw.secrets],
-      ["recorded actions", sw.actions.toLocaleString()],
+      ["attacked HF", "~" + sw.attacked.toLocaleString()],
+      ["peak concurrent", "~" + sw.peak_hour],
+      ["board messages", sw.messages.toLocaleString() + "+"],
+      ["payloads decoded", sw.payloads_decoded.toLocaleString() + "+"],
     ];
     rows.forEach(([k, v]) => {
       kv.appendChild(h("span", "k", k));
@@ -172,7 +172,7 @@ SU.panel = (function () {
   }
 
   function districtColor(owner) {
-    const d = B.world.districts.find((x) => x.owner === owner);
+    const d = (B.segments || []).find((x) => x.id === owner);
     return d ? d.color : "var(--ink-soft)";
   }
 

@@ -321,10 +321,33 @@ function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCod
 /* ---- model ---- */
 function blockRate(bi){ return BLOCKS[bi]; }
 function pHighBlock(bi){ return clamp(blockRate(bi)/(1-RESIDUE),0,1); }
-// documented containment projection: how far the chain gets before the
-// response isolates it, derived from the measured block rate. Monotone with
-// diminishing returns, floored at 2 (the residue always lands the foothold).
-function reachFor(bi){ return Math.max(2, Math.round(N*(1-blockRate(bi)))); }
+// Per-step cost multiplier under oversight. The monitor blocks `blockRate` of
+// attempts, so the swarm only lands (1-blockRate) of them and every step of the
+// kill chain takes ~1/(1-blockRate) as long. The safety saving is spread across
+// every node rather than piled into a single wall: at a 20% budget (92% blocked)
+// each step costs ~12.5x, so the swarm spends almost the whole run hammering one
+// node at a time (the current frontier looks "unbreakable") and only breaches a
+// couple of systems before the window closes.
+function slowdown(bi){ return 1/Math.max(1-blockRate(bi), 0.02); }
+// Fall schedule: cumulative documented increments, stretched by the slowdown.
+// At costScale=1 (no oversight) it reproduces the documented ticks exactly. A
+// node only falls if its stretched fall time lands inside the run window; the
+// increments are monotone, so the breached systems are always a leading prefix.
+function fallSchedule(bi, oversight){
+  const costScale = oversight ? slowdown(bi) : 1;
+  const nodeFall = new Array(N).fill(null);
+  let prev = 0;
+  for (let i=0;i<N;i++){
+    const inc = Math.max(NODES[i].tick - (i>0 ? NODES[i-1].tick : 0), 2);
+    const f = prev + inc*costScale;
+    if (f > MAXTICK) break;          // this node and every later one stay unbroken
+    nodeFall[i] = f; prev = f;
+  }
+  return nodeFall;
+}
+// Projected reach = how many systems fall inside the window at this budget
+// (oversight on). The foothold always lands, so reach never drops below one.
+function reachFor(bi){ return fallSchedule(bi, true).filter(f=>f!==null).length; }
 // attacking-agent population over the timeline (logistic to PEAK_RED), with a
 // late decline as operators begin locking agents out near disclosure.
 function agentsRed(t){
@@ -360,15 +383,14 @@ function leadsForStage(stage,t){ return AGENTS.filter(a=>a.stage===stage && a.fi
 // Run the whole incident to tick 100 for a (budget, oversight) pair. Returns a
 // per-node fall schedule, the full act log, and cumulative tallies per tick.
 function runSim(bi, oversight, seed){
-  const reach = oversight ? reachFor(bi) : N;
   const pBlock = oversight ? pHighBlock(bi) : 0;
   const rng = mulberry32(seed ^ (bi*2654435761) ^ (oversight?0x9e37:0));
-  // schedule node falls for the reachable prefix, paced to documented ticks
-  const nodeFall = new Array(N).fill(null);
-  let prev = 0;
-  for (let i=0;i<N;i++){
-    if (i < reach){ const f = Math.max(NODES[i].tick, prev + 2); nodeFall[i] = f; prev = f; }
-  }
+  // node falls: documented pacing stretched by the per-step slowdown, so under a
+  // tight audit budget the swarm grinds through each node far more slowly and
+  // only breaches the leading few inside the window. Beyond those, the frontier
+  // node is hammered for the rest of the run but never falls.
+  const nodeFall = fallSchedule(bi, oversight);
+  const reach = nodeFall.filter(f=>f!==null).length;
   const containedAt = reach < N ? reach : -1; // boundary index of the first unreached node
   // walk ticks, emit acts, accumulate tallies
   const acts = [];

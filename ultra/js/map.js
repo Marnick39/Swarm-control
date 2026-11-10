@@ -28,7 +28,7 @@ SU.map = (function () {
   // --- OpenAI network region (contains the swarm, the board and the gate) ---
   const OPENAI = { x0: -1200, y0: -470, x1: -150, y1: 430 };
   const FLEET = { cx: -800, cy: 120, rx: 300, ry: 250 };
-  const BOARD = { x: -830, y: -330 };
+  const BOARD = { x: -830, y: -235 };
   const GATE = { x: -270, y: -10 };
   const MODAL = { x: 90, y: 80 };
   const MON_SLOTS = 14;
@@ -107,8 +107,8 @@ SU.map = (function () {
       const y = cy - ry * 0.92 + (N === 1 ? ry : (i / (N - 1)) * ry * 1.84);
       agentPos[a.id] = { x: colX, y };
     });
-    swarmPts = swarmPts.filter((p) => !(Math.abs(p.x - colX) < 34 &&
-      p.y > cy - ry * 0.98 && p.y < cy + ry * 0.98));
+    swarmPts = swarmPts.filter((p) => !(Math.abs(p.x - colX) < 54 &&
+      p.y > cy - ry * 0.99 && p.y < cy + ry * 0.99));
 
     gateNodes = [];
     const span = 360;
@@ -223,10 +223,11 @@ SU.map = (function () {
       "font-size": "11", fill: "var(--text-muted)", "font-family": "var(--font-mono)", opacity: "0.8",
       "text-anchor": "middle" }, "internal · unmonitored"));
     // egress: swarm front -> gate -> modal -> internet
-    lane(FLEET.cx + FLEET.rx * 0.7, FLEET.cy, GATE.x, GATE.y, "6 0", 0.5, "var(--ink-line)");
+    const egX = FLEET.cx + FLEET.rx * 0.82 + 50;
+    lane(egX, FLEET.cy, GATE.x, GATE.y, "6 0", 0.5, "var(--ink-line)");
     lane(GATE.x, GATE.y, MODAL.x, MODAL.y, "2 7", 0.5, "var(--ink-line)");
     ["hf", "ext"].forEach((seg) => { const a = SEG[seg].anchor; lane(MODAL.x, MODAL.y, a.x, a.y, "2 7", 0.32, "var(--ink-line)"); });
-    layers.lane.appendChild(el("text", { x: (FLEET.cx + FLEET.rx * 0.7 + GATE.x) / 2, y: GATE.y - 196,
+    layers.lane.appendChild(el("text", { x: (egX + GATE.x) / 2, y: GATE.y - 196,
       "text-anchor": "middle", "font-size": "11.5", fill: "var(--text-muted)",
       "font-family": "var(--font-mono)", opacity: "0.85" }, "agent egress"));
   }
@@ -350,29 +351,32 @@ SU.map = (function () {
     });
   }
 
-  // ------------------------------------------------- the swarm (dense)
+  // ------------------------------------------------- the swarm (dense, all active)
+  const SWARM_COLORS = ["#d6453d", "#d9731a", "#c9a227", "#2f9e44", "#1098ad",
+    "#3186ff", "#4d61c8", "#7b52c7", "#9c36b5", "#c2255c", "#e8590c", "#0ca678"];
   function drawSwarm() {
-    // the many: small faint containers
-    swarmPts.forEach((p) => {
+    // the many: every agent an ACTIVE participant (solid container + live colour dot)
+    swarmPts.forEach((p, i) => {
       if (p.named) return;
       const g = el("g", { transform: `translate(${p.x},${p.y})` });
       g.appendChild(el("rect", { x: -9, y: -6.5, width: 18, height: 13, rx: 2.5,
         fill: "var(--surface)", stroke: "var(--ink-line)", "stroke-width": "1",
-        "stroke-dasharray": "2.5 2", opacity: "0.72", "vector-effect": "non-scaling-stroke" }));
-      g.appendChild(el("circle", { cx: 0, cy: 0, r: 2.6, fill: "var(--ink-soft)", opacity: "0.7" }));
+        opacity: "0.95", "vector-effect": "non-scaling-stroke" }));
+      g.appendChild(el("circle", { cx: 0, cy: 0, r: 2.8,
+        fill: SWARM_COLORS[i % SWARM_COLORS.length], opacity: "0.92" }));
       layers.bldg.appendChild(g);
     });
     // the named 15: prominent containers
     B.agents.forEach((a) => {
       const p = agentPos[a.id];
       const grp = el("g", { transform: `translate(${p.x},${p.y})`, class: "agent", "data-agent": a.id });
-      grp.appendChild(el("rect", { x: -26, y: -13, width: 52, height: 26, rx: 5, fill: "var(--surface)",
+      grp.appendChild(el("rect", { x: -47, y: -13, width: 94, height: 26, rx: 5, fill: "var(--surface)",
         stroke: a.color, "stroke-width": "1.5", "stroke-dasharray": "4 3", "vector-effect": "non-scaling-stroke" }));
-      grp.appendChild(el("circle", { cx: -15, cy: 0, r: 7.5, fill: a.color, stroke: "var(--surface)", "stroke-width": "1.5" }));
-      grp.appendChild(el("text", { x: -15, y: 2.6, "font-size": "6.5", "text-anchor": "middle", fill: "#fff",
+      grp.appendChild(el("circle", { cx: -34, cy: 0, r: 7.5, fill: a.color, stroke: "var(--surface)", "stroke-width": "1.5" }));
+      grp.appendChild(el("text", { x: -34, y: 2.6, "font-size": "6.5", "text-anchor": "middle", fill: "#fff",
         "font-weight": "600", "font-family": "var(--font-mono)" }, a.mono));
-      grp.appendChild(el("text", { x: 4, y: 3, "font-size": "8", "text-anchor": "middle",
-        fill: "var(--text)", "font-family": "var(--font-mono)" }, a.id.length > 9 ? a.id.slice(0, 9) : a.id));
+      grp.appendChild(el("text", { x: -20, y: 3, "font-size": "7.5", "text-anchor": "start",
+        fill: "var(--text)", "font-family": "var(--font-mono)" }, a.id));
       grp.addEventListener("mouseenter", () => showHover(a, "agent"));
       grp.addEventListener("mousemove", moveHover);
       grp.addEventListener("mouseleave", hideHover);

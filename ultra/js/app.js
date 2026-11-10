@@ -219,11 +219,12 @@ SU.app = (function () {
   function updateWidget() {
     const bi = state.budgetIdx;
     const budget = B.control.budgets[bi], frac = B.control.blocks[bi];
-    const lit = [0, 1, 2, 4, 6, 9, 12][bi];
+    const slots = SU.map.monSlots ? SU.map.monSlots() : 12;
+    const lit = SU.map.monCount ? SU.map.monCount(bi) : bi;
     if ($("mw-budget")) $("mw-budget").textContent = budget + "% of egress";
     if ($("mw-slider")) $("mw-slider").value = bi;
     if ($("mw-blocked")) $("mw-blocked").textContent = Math.round(frac * 100) + "%";
-    if ($("mw-monitors")) $("mw-monitors").textContent = lit + "/12";
+    if ($("mw-monitors")) $("mw-monitors").textContent = lit + "/" + slots;
     if ($("mw-note")) $("mw-note").innerHTML =
       budget === 0 ? "No monitors on the gate &mdash; every egress attack lands." :
       `${lit} monitor${lit > 1 ? "s" : ""} staffing the gate. The internal board and HF-internal lateral movement stay <b>unmonitored</b>.`;

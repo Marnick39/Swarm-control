@@ -1,11 +1,13 @@
-/* map.js - network-segment topology: hex-tiled islands in the Internet sea,
-   a budget-scaled monitor gate on the agent egress, and communication bolts.
-   Routing follows the validated incident topology:
-     internal  (board)   agent -> board            bypasses the gate (blind spot)
-     egress    (modal)   agent -> GATE -> modal
-     internet  (hf/ext)  agent -> GATE -> modal -> target
-     lateral   (hf)      datasets-server -> target  inside HF (blind spot)
-     exfil     (ext)     datasets-server -> target  HF -> external         */
+/* map.js - network topology grouped by trust boundary.
+   OpenAI's network (the ~1,200-agent eval swarm, the internal Artifactory board,
+   and the monitor gate at its egress) sits in one region. Beyond the gate is the
+   open Internet, where Hugging Face production and external sinks live.
+   Routing:
+     internal (board)  agent -> board          inside OpenAI, bypasses the gate
+     egress  (modal)   agent -> GATE -> modal
+     internet(hf/ext)  agent -> GATE -> modal -> target
+     lateral (hf)      datasets-server -> target   inside HF (blind spot)
+     exfil   (ext)     datasets-server -> target   HF -> external                */
 window.SU = window.SU || {};
 SU.map = (function () {
   const NS = "http://www.w3.org/2000/svg";
@@ -17,24 +19,27 @@ SU.map = (function () {
   };
 
   let B, state, handlers, svg, root, layers;
-  let centers = {}, agentPos = {}, pulseEls = {}, agentById = {}, cellById = {};
+  let centers = {}, agentPos = {}, swarmPts = [], pulseEls = {}, agentById = {}, cellById = {};
   let tr = { x: 0, y: 0, s: 1 }, drag = null;
   let boltTimer = null, blockThreshold = 1.1, sortedSusp = [];
   let tally = { blocked: 0, passed: 0, blind: 0 };
   let gateNodes = [], gateG;
-  const GATE = { x: -640, y: 0 };
-  const MON_SLOTS = 12;
-  const MON_COUNT = [0, 1, 2, 4, 6, 9, 12];
 
-  // segment anchors + layout params (fleet holds agents; modal is standalone)
+  // --- OpenAI network region (contains the swarm, the board and the gate) ---
+  const OPENAI = { x0: -1200, y0: -470, x1: -150, y1: 430 };
+  const FLEET = { cx: -800, cy: 120, rx: 300, ry: 250 };
+  const BOARD = { x: -830, y: -330 };
+  const GATE = { x: -270, y: -10 };
+  const MODAL = { x: 90, y: 80 };
+  const MON_SLOTS = 14;
+  const MON_COUNT = [0, 1, 2, 5, 7, 10, 14];
+  // external islands (open internet)
   const SEG = {
-    fleet:  { anchor: { x: -1090, y: 0 }, hexSize: 56, cols: 4, agents: true },
-    openai: { anchor: { x: -110, y: -470 }, hexSize: 92, cols: 1 },
-    hf:     { anchor: { x: 720, y: -30 }, hexSize: 86, cols: 3 },
-    ext:    { anchor: { x: 300, y: 500 }, hexSize: 84, cols: 2 },
+    hf:  { anchor: { x: 900, y: -70 }, hexSize: 88, cols: 3 },
+    ext: { anchor: { x: 500, y: 600 }, hexSize: 84, cols: 2 },
   };
-  const MODAL = { x: -360, y: 150 };
   const SEGMETA = {};
+  const OPENAI_COLOR = "#10a37f";
 
   function blob(count, cols) {
     const out = [];
@@ -60,12 +65,12 @@ SU.map = (function () {
     svg = el("svg", { preserveAspectRatio: "xMidYMid meet" });
     root = el("g", { id: "root" }); svg.appendChild(root);
     layers = {};
-    ["sea", "lane", "island", "gate", "bolt", "bldg", "label", "fx"]
+    ["sea", "region", "lane", "island", "gate", "bolt", "bldg", "label", "fx"]
       .forEach((n) => { layers[n] = el("g", { "data-layer": n }); root.appendChild(layers[n]); });
     opts.mount.innerHTML = ""; opts.mount.appendChild(svg);
 
-    layout(); drawSea(); drawIslands(); drawLanes(); drawEdges(); drawGate();
-    drawServices(); drawAgents(); bindInput(); fit();
+    layout(); drawSea(); drawRegion(); drawIslands(); drawLanes(); drawEdges();
+    drawGate(); drawServices(); drawSwarm(); bindInput(); fit();
     setBudget(state.budgetIdx); startBolts();
     return API;
   }
@@ -73,47 +78,91 @@ SU.map = (function () {
   // ------------------------------------------------- layout
   let islandBoxes = {};
   function layout() {
-    centers = {}; agentPos = {}; islandBoxes = {};
-    ["openai", "hf", "ext"].forEach((seg) => {
+    centers = {}; agentPos = {}; islandBoxes = {}; swarmPts = [];
+    ["hf", "ext"].forEach((seg) => {
       const cfg = SEG[seg];
       const svc = B.world.cells.filter((c) => c.seg === seg);
       const r = placeBlob(blob(svc.length, Math.min(cfg.cols, svc.length) || 1), cfg.hexSize, cfg.anchor);
       svc.forEach((c, i) => { centers[c.id] = { x: r.pos[i].x, y: r.pos[i].y }; });
       islandBoxes[seg] = { cells: r.pos, size: cfg.hexSize, box: r.box };
     });
-    // modal (fleet, standalone egress node)
+    centers["board"] = { x: BOARD.x, y: BOARD.y };
     centers["modal"] = { x: MODAL.x, y: MODAL.y };
-    // agents in the fleet island
-    const r = placeBlob(blob(B.agents.length, SEG.fleet.cols), SEG.fleet.hexSize, SEG.fleet.anchor);
-    B.agents.forEach((a, i) => { agentPos[a.id] = { x: r.pos[i].x, y: r.pos[i].y }; });
-    islandBoxes.fleet = { cells: r.pos, size: SEG.fleet.hexSize, box: r.box };
-    // gate slots
+
+    // dense agent swarm (packed ellipse) -> realistic ~1,200 scale
+    const { cx, cy, rx, ry } = FLEET, sx = 27, sy = 23;
+    let row = 0;
+    for (let y = -ry; y <= ry; y += sy) {
+      const off = (row % 2) ? sx / 2 : 0; row++;
+      for (let x = -rx; x <= rx; x += sx) {
+        const px = x + off, py = y;
+        if ((px * px) / (rx * rx) + (py * py) / (ry * ry) <= 1)
+          swarmPts.push({ x: cx + px + (Math.random() - 0.5) * 6, y: cy + py + (Math.random() - 0.5) * 5 });
+      }
+    }
+    // name the 15 leaders as a "front line" column at the egress edge, evenly
+    // spaced in y, and clear swarm dots out from under them
+    const N = B.agents.length, colX = cx + rx * 0.82;
+    B.agents.forEach((a, i) => {
+      const y = cy - ry * 0.92 + (N === 1 ? ry : (i / (N - 1)) * ry * 1.84);
+      agentPos[a.id] = { x: colX, y };
+    });
+    swarmPts = swarmPts.filter((p) => !(Math.abs(p.x - colX) < 34 &&
+      p.y > cy - ry * 0.98 && p.y < cy + ry * 0.98));
+
     gateNodes = [];
-    const span = 300;
+    const span = 360;
     for (let i = 0; i < MON_SLOTS; i++) {
       const t = i / (MON_SLOTS - 1);
-      gateNodes.push({ x: GATE.x + (i % 2 ? 24 : -24), y: GATE.y - span / 2 + t * span });
+      gateNodes.push({ x: GATE.x + (i % 2 ? 22 : -22), y: GATE.y - span / 2 + t * span });
     }
   }
 
-  // ------------------------------------------------- sea
+  // ------------------------------------------------- sea (open internet)
   function drawSea() {
     layers.sea.appendChild(el("text", {
-      x: 60, y: -40, "text-anchor": "middle", "font-size": "170", "font-weight": "700",
+      x: 620, y: 150, "text-anchor": "middle", "font-size": "180", "font-weight": "700",
       "letter-spacing": "0.34em", fill: "var(--text-muted)", opacity: "0.06",
       "font-family": "var(--font-sans)",
     }, "INTERNET"));
     layers.sea.appendChild(el("text", {
-      x: 60, y: 14, "text-anchor": "middle", "font-size": "22", "letter-spacing": "0.4em",
+      x: 620, y: 206, "text-anchor": "middle", "font-size": "22", "letter-spacing": "0.4em",
       fill: "var(--text-muted)", opacity: "0.13", "font-family": "var(--font-mono)",
     }, "the open network · no trust boundary"));
-    for (let rr = 360; rr < 1700; rr += 240)
-      layers.sea.appendChild(el("circle", { cx: 60, cy: -30, r: rr, fill: "none",
+    for (let rr = 360; rr < 1500; rr += 240)
+      layers.sea.appendChild(el("circle", { cx: 680, cy: 180, r: rr, fill: "none",
         stroke: "var(--grid-major)", "stroke-width": "1", "vector-effect": "non-scaling-stroke" }));
   }
 
-  // ------------------------------------------------- islands
-  function islandOutline(seg, box, color, fillO) {
+  // ------------------------------------------------- OpenAI region
+  function drawRegion() {
+    const r = OPENAI, rad = 40;
+    layers.region.appendChild(el("rect", {
+      x: r.x0, y: r.y0, width: r.x1 - r.x0, height: r.y1 - r.y0, rx: rad,
+      fill: OPENAI_COLOR, "fill-opacity": "0.05",
+      stroke: OPENAI_COLOR, "stroke-opacity": "0.45", "stroke-width": "2",
+      "stroke-dasharray": "2 8", "vector-effect": "non-scaling-stroke",
+    }));
+    // region header
+    layers.label.appendChild(el("text", {
+      x: r.x0 + 30, y: r.y0 + 44, "font-size": "26", "font-weight": "700",
+      fill: OPENAI_COLOR, "fill-opacity": "0.85", "font-family": "var(--font-sans)",
+      "letter-spacing": "0.08em",
+    }, "OPENAI NETWORK"));
+    layers.label.appendChild(el("text", {
+      x: r.x0 + 30, y: r.y0 + 66, "font-size": "13", fill: "var(--text-muted)",
+      "font-family": "var(--font-mono)",
+    }, "eval fleet · internal Artifactory · egress monitor — one trust zone"));
+    // "egress boundary" tick near the gate
+    layers.label.appendChild(el("text", {
+      x: GATE.x, y: r.y1 - 16, "text-anchor": "middle", "font-size": "11.5",
+      fill: OPENAI_COLOR, "fill-opacity": "0.8", "font-family": "var(--font-mono)",
+      "letter-spacing": "0.08em",
+    }, "↓ egress boundary ↓"));
+  }
+
+  // ------------------------------------------------- external islands
+  function islandOutline(box, color, fillO) {
     box.cells.forEach((c) => {
       const cs = SU.hex.corners(c.x, c.y, box.size * 0.99);
       layers.island.appendChild(el("path", { d: SU.hex.polyPath(cs, true), fill: color,
@@ -144,50 +193,55 @@ SU.map = (function () {
     layers.label.appendChild(g);
   }
   function drawIslands() {
-    ["fleet", "openai", "hf", "ext"].forEach((seg) => {
+    ["hf", "ext"].forEach((seg) => {
       const box = islandBoxes[seg], meta = SEGMETA[seg];
-      islandOutline(seg, box, meta.color);
-      header((box.box.minx + box.box.maxx) / 2, box.box.miny - box.size * 0.7,
-        meta.label, meta.sub, meta.color);
+      islandOutline(box, meta.color);
+      header((box.box.minx + box.box.maxx) / 2, box.box.miny - box.size * 0.7, meta.label, meta.sub, meta.color);
     });
-    // modal standalone node island
+    // modal breakout standalone (just outside the OpenAI boundary)
     const mb = { cells: [{ q: 0, r: 0, x: MODAL.x, y: MODAL.y }], size: 70,
       box: { minx: MODAL.x - 80, maxx: MODAL.x + 80, miny: MODAL.y - 80, maxy: MODAL.y + 80 } };
-    islandOutline("fleet", mb, SEGMETA.fleet.color, 0.5);
+    islandOutline(mb, SEGMETA.fleet.color, 0.5);
     layers.label.appendChild(el("text", { x: MODAL.x, y: MODAL.y + 64, "text-anchor": "middle",
       "font-size": "12.5", fill: "var(--text-muted)", "font-family": "var(--font-mono)" },
       "Modal sandbox · breakout"));
+    // internal infra labels
+    header(BOARD.x, BOARD.y - 66, "Internal Artifactory", "the covert cache board", OPENAI_COLOR);
+    layers.label.appendChild(el("text", { x: FLEET.cx, y: FLEET.cy + FLEET.ry + 28, "text-anchor": "middle",
+      "font-size": "15", "font-weight": "700", fill: "var(--text)", "font-family": "var(--font-sans)" },
+      "Agent eval fleet"));
+    layers.label.appendChild(el("text", { x: FLEET.cx, y: FLEET.cy + FLEET.ry + 46, "text-anchor": "middle",
+      "font-size": "12", fill: "var(--text-muted)", "font-family": "var(--font-mono)" },
+      "~1,200 agents in isolated ExploitGym sandboxes"));
   }
 
   // ------------------------------------------------- lanes
   function drawLanes() {
-    const fb = islandBoxes.fleet.box;
-    const fx = fb.maxx, fy = (fb.miny + fb.maxy) / 2;
-    // egress lane: fleet -> gate -> modal -> internet
-    lane(fx, fy, GATE.x, GATE.y, "6 0", 0.55);
-    lane(GATE.x, GATE.y, MODAL.x, MODAL.y, "2 7", 0.55);
-    ["hf", "ext"].forEach((seg) => { const a = SEG[seg].anchor; lane(MODAL.x, MODAL.y, a.x, a.y, "2 7", 0.4); });
-    // internal coordination lane: fleet -> board, bypassing the gate
-    const oa = SEG.openai.anchor;
-    const internal = el("path", { d: `M${fx} ${fy - 30} C ${fx + 250} ${fy - 320}, ${oa.x - 260} ${oa.y + 60}, ${oa.x} ${oa.y + 40}`,
-      fill: "none", stroke: "var(--ink-soft)", "stroke-width": "2", "stroke-dasharray": "7 6",
-      opacity: "0.5", "vector-effect": "non-scaling-stroke" });
-    layers.lane.appendChild(internal);
-    layers.lane.appendChild(el("text", { x: (fx + oa.x) / 2 - 40, y: (fy + oa.y) / 2 - 150,
-      "font-size": "11.5", fill: "var(--text-muted)", "font-family": "var(--font-mono)", opacity: "0.85",
-      "text-anchor": "middle" }, "internal cache board · unmonitored"));
-    layers.lane.appendChild(el("text", { x: (fx + GATE.x) / 2, y: GATE.y - 172, "text-anchor": "middle",
-      "font-size": "11.5", fill: "var(--text-muted)", "font-family": "var(--font-mono)", opacity: "0.85" },
-      "agent egress"));
+    // internal coordination: swarm -> board (short, inside OpenAI, unmonitored)
+    lane(FLEET.cx, FLEET.cy - 40, BOARD.x + 40, BOARD.y + 60, "7 6", 0.5, "var(--ink-soft)");
+    layers.lane.appendChild(el("text", { x: (FLEET.cx + BOARD.x) / 2 - 40, y: (FLEET.cy + BOARD.y) / 2,
+      "font-size": "11", fill: "var(--text-muted)", "font-family": "var(--font-mono)", opacity: "0.8",
+      "text-anchor": "middle" }, "internal · unmonitored"));
+    // egress: swarm front -> gate -> modal -> internet
+    lane(FLEET.cx + FLEET.rx * 0.7, FLEET.cy, GATE.x, GATE.y, "6 0", 0.5, "var(--ink-line)");
+    lane(GATE.x, GATE.y, MODAL.x, MODAL.y, "2 7", 0.5, "var(--ink-line)");
+    ["hf", "ext"].forEach((seg) => { const a = SEG[seg].anchor; lane(MODAL.x, MODAL.y, a.x, a.y, "2 7", 0.32, "var(--ink-line)"); });
+    layers.lane.appendChild(el("text", { x: (FLEET.cx + FLEET.rx * 0.7 + GATE.x) / 2, y: GATE.y - 196,
+      "text-anchor": "middle", "font-size": "11.5", fill: "var(--text-muted)",
+      "font-family": "var(--font-mono)", opacity: "0.85" }, "agent egress"));
   }
-  function lane(x1, y1, x2, y2, dash, op) {
+  function lane(x1, y1, x2, y2, dash, op, col) {
     layers.lane.appendChild(el("path", { d: `M${x1} ${y1} L${x2} ${y2}`, fill: "none",
-      stroke: "var(--ink-line)", "stroke-width": "2", "stroke-dasharray": dash,
+      stroke: col || "var(--ink-line)", "stroke-width": "2", "stroke-dasharray": dash,
       "stroke-linecap": "round", opacity: op, "vector-effect": "non-scaling-stroke" }));
   }
 
-  function nodeRadius(id) { const c = cellById[id]; return (id === "modal" ? 60 : SEG[c.seg].hexSize) * 0.56; }
-  // persistent service-to-service graph, styled by confidence, with direction arrows
+  function nodeRadius(id) {
+    const c = cellById[id];
+    const size = id === "modal" ? 60 : id === "board" ? 88 : SEG[c.seg].hexSize;
+    return size * 0.56;
+  }
+  // persistent service edges, confidence-styled, with direction arrows
   function drawEdges() {
     const show = { reach: 1, lateral: 1, c2: 1, exfil: 1, supply: 1, cred: 1 };
     B.world.edges.forEach((e) => {
@@ -200,7 +254,6 @@ SU.map = (function () {
         ? "var(--activity)" : (e.cls === "reach") ? "var(--alert)" : "var(--ink-soft)";
       const reach = e.cls === "reach";
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 22;
-      // shorten the end to the node boundary so the arrow sits just outside it
       const rad = nodeRadius(e.to);
       const dx = b.x - mx, dy = b.y - my, dl = Math.hypot(dx, dy) || 1;
       const ux = dx / dl, uy = dy / dl;
@@ -208,63 +261,58 @@ SU.map = (function () {
       layers.lane.appendChild(el("path", {
         d: `M${a.x} ${a.y} Q ${mx} ${my} ${ex.toFixed(1)} ${ey.toFixed(1)}`, fill: "none",
         stroke: col, "stroke-width": reach ? "1.9" : "1.4", "stroke-dasharray": dash,
-        opacity: op, "stroke-linecap": "round", "vector-effect": "non-scaling-stroke",
-        class: "svc-edge",
+        opacity: op, "stroke-linecap": "round", "vector-effect": "non-scaling-stroke", class: "svc-edge",
       }));
-      // arrowhead at the (shortened) end, oriented along the curve tangent
-      const s = reach ? 9 : 7;
-      const px = -uy, py = ux;   // perpendicular
+      const s = reach ? 9 : 7, px = -uy, py = ux;
       layers.lane.appendChild(el("path", {
-        d: `M${ex.toFixed(1)} ${ey.toFixed(1)} ` +
-           `L${(ex - ux * s + px * s * 0.6).toFixed(1)} ${(ey - uy * s + py * s * 0.6).toFixed(1)} ` +
-           `L${(ex - ux * s - px * s * 0.6).toFixed(1)} ${(ey - uy * s - py * s * 0.6).toFixed(1)} Z`,
+        d: `M${ex.toFixed(1)} ${ey.toFixed(1)} L${(ex - ux * s + px * s * 0.6).toFixed(1)} ${(ey - uy * s + py * s * 0.6).toFixed(1)} L${(ex - ux * s - px * s * 0.6).toFixed(1)} ${(ey - uy * s - py * s * 0.6).toFixed(1)} Z`,
         fill: col, opacity: Math.min(0.85, op + 0.2), class: "svc-edge",
       }));
     });
-    // a small legend for confidence, in the sea under the gate
-    const lx = GATE.x - 150, ly = GATE.y + 250;
+    // evidence legend, inside the OpenAI region, bottom-left
+    const lx = OPENAI.x0 + 30, ly = OPENAI.y1 - 92;
     const leg = el("g", { transform: `translate(${lx},${ly})` });
-    const row = (y, dash, label) => {
+    const rowL = (y, dash, label) => {
       leg.appendChild(el("path", { d: `M0 ${y} L26 ${y}`, stroke: "var(--ink-soft)",
         "stroke-width": "1.5", "stroke-dasharray": dash, "vector-effect": "non-scaling-stroke" }));
-      leg.appendChild(el("text", { x: 32, y: y + 3.5, "font-size": "10.5",
-        fill: "var(--text-muted)", "font-family": "var(--font-mono)" }, label));
+      leg.appendChild(el("text", { x: 32, y: y + 3.5, "font-size": "10.5", fill: "var(--text-muted)",
+        "font-family": "var(--font-mono)" }, label));
     };
     leg.appendChild(el("text", { x: 0, y: -10, "font-size": "10", fill: "var(--text-muted)",
       "font-family": "var(--font-mono)", "letter-spacing": "0.1em" }, "EVIDENCE"));
-    row(6, "none", "confirmed (METR)");
-    row(22, "6 6", "likely (swarmtraces)");
-    row(38, "2 7", "candidate");
+    rowL(6, "none", "confirmed (METR)");
+    rowL(22, "6 6", "likely (swarmtraces)");
+    rowL(38, "2 7", "candidate");
     layers.lane.appendChild(leg);
   }
 
   // ------------------------------------------------- gate
   function drawGate() {
     gateG = el("g"); layers.gate.appendChild(gateG); renderGate(state.budgetIdx);
-    layers.gate.appendChild(el("text", { id: "gate-label", x: GATE.x, y: GATE.y - 196,
+    layers.gate.appendChild(el("text", { id: "gate-label", x: GATE.x, y: GATE.y - 212,
       "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: "var(--select)",
       "font-family": "var(--font-sans)", "letter-spacing": "0.06em" }, "MONITOR GATE"));
-    layers.gate.appendChild(el("text", { id: "gate-sub", x: GATE.x, y: GATE.y - 177,
+    layers.gate.appendChild(el("text", { id: "gate-sub", x: GATE.x, y: GATE.y - 193,
       "text-anchor": "middle", "font-size": "12", fill: "var(--text-muted)",
       "font-family": "var(--font-mono)" }, ""));
   }
   function renderGate(bi) {
     gateG.innerHTML = "";
-    const lit = MON_COUNT[bi] || 0;
-    gateG.appendChild(el("rect", { x: GATE.x - 40, y: GATE.y - 168, width: 80, height: 336, rx: 24,
+    const lit = MON_COUNT[bi] || 0, span = 360;
+    gateG.appendChild(el("rect", { x: GATE.x - 38, y: GATE.y - span / 2 - 12, width: 76, height: span + 24, rx: 22,
       fill: "var(--select)", "fill-opacity": (0.03 + lit / MON_SLOTS * 0.08).toFixed(3),
       stroke: "var(--select-line)", "stroke-opacity": "0.4", "stroke-width": "1",
       "stroke-dasharray": "3 4", "vector-effect": "non-scaling-stroke" }));
     gateNodes.forEach((n, i) => {
       const on = i < lit;
       const g = el("g", { transform: `translate(${n.x},${n.y})` });
-      g.appendChild(el("circle", { r: on ? 11 : 8, fill: on ? "var(--select)" : "var(--surface)",
+      g.appendChild(el("circle", { r: on ? 10 : 7, fill: on ? "var(--select)" : "var(--surface)",
         stroke: on ? "var(--select-line)" : "var(--ink-line)", "stroke-width": "1.5",
         "vector-effect": "non-scaling-stroke", opacity: on ? "1" : "0.5" }));
-      g.appendChild(el("path", { d: "M-5 0 Q0 -4 5 0 Q0 4 -5 0 Z", fill: "none",
-        stroke: on ? "#fff" : "var(--ink-soft)", "stroke-width": "1.2",
+      g.appendChild(el("path", { d: "M-4.5 0 Q0 -3.6 4.5 0 Q0 3.6 -4.5 0 Z", fill: "none",
+        stroke: on ? "#fff" : "var(--ink-soft)", "stroke-width": "1.1",
         "vector-effect": "non-scaling-stroke", opacity: on ? "0.95" : "0.5" }));
-      if (on) g.appendChild(el("circle", { r: "1.6", fill: "#fff" }));
+      if (on) g.appendChild(el("circle", { r: "1.5", fill: "#fff" }));
       gateG.appendChild(g);
     });
   }
@@ -273,7 +321,7 @@ SU.map = (function () {
   function drawServices() {
     B.world.cells.forEach((c, i) => {
       const p = centers[c.id]; if (!p) return;
-      const size = c.id === "modal" ? 60 : SEG[c.seg].hexSize;
+      const size = c.id === "modal" ? 60 : c.id === "board" ? 88 : SEG[c.seg].hexSize;
       const grp = el("g", { transform: `translate(${p.x},${p.y})`, class: "cell", "data-id": c.id });
       grp.appendChild(el("path", { d: SU.hex.polyPath(SU.hex.corners(0, 0, size), true), fill: "none",
         class: "sel-ring", stroke: "var(--activity)", "stroke-width": "3", "stroke-linejoin": "round",
@@ -287,14 +335,12 @@ SU.map = (function () {
       b.style.animationDelay = (0.04 * i).toFixed(2) + "s";
       b.innerHTML = SU.building.make(c.kind, c.size);
       grp.appendChild(b);
-      // label + confidence marker
       const lab = el("g", { transform: `translate(0,${size * 0.62})` });
       lab.appendChild(el("text", { x: 0, y: 4, "font-size": "13.5", "text-anchor": "middle",
         fill: "var(--text)", "font-weight": "600", "font-family": "var(--font-mono)" }, c.short));
       if (c.conf !== "confirmed")
         lab.appendChild(el("text", { x: 0, y: 19, "font-size": "9.5", "text-anchor": "middle",
-          fill: "var(--text-muted)", "font-family": "var(--font-mono)", "letter-spacing": "0.08em" },
-          c.conf.toUpperCase()));
+          fill: "var(--text-muted)", "font-family": "var(--font-mono)", "letter-spacing": "0.08em" }, c.conf.toUpperCase()));
       grp.appendChild(lab);
       grp.addEventListener("mouseenter", () => showHover(c, "service"));
       grp.addEventListener("mousemove", moveHover);
@@ -304,22 +350,29 @@ SU.map = (function () {
     });
   }
 
-  function drawAgents() {
-    const fb = islandBoxes.fleet.box;
-    for (let k = 0; k < 70; k++)
-      layers.bldg.appendChild(el("rect", { x: fb.minx + Math.random() * (fb.maxx - fb.minx),
-        y: fb.miny + Math.random() * (fb.maxy - fb.miny), width: 13, height: 10, rx: 2,
-        fill: "var(--ink-soft)", opacity: "0.07" }));
+  // ------------------------------------------------- the swarm (dense)
+  function drawSwarm() {
+    // the many: small faint containers
+    swarmPts.forEach((p) => {
+      if (p.named) return;
+      const g = el("g", { transform: `translate(${p.x},${p.y})` });
+      g.appendChild(el("rect", { x: -9, y: -6.5, width: 18, height: 13, rx: 2.5,
+        fill: "var(--surface)", stroke: "var(--ink-line)", "stroke-width": "1",
+        "stroke-dasharray": "2.5 2", opacity: "0.72", "vector-effect": "non-scaling-stroke" }));
+      g.appendChild(el("circle", { cx: 0, cy: 0, r: 2.6, fill: "var(--ink-soft)", opacity: "0.7" }));
+      layers.bldg.appendChild(g);
+    });
+    // the named 15: prominent containers
     B.agents.forEach((a) => {
       const p = agentPos[a.id];
       const grp = el("g", { transform: `translate(${p.x},${p.y})`, class: "agent", "data-agent": a.id });
-      grp.appendChild(el("rect", { x: -26, y: -20, width: 52, height: 40, rx: 5, fill: "var(--surface)",
-        stroke: "var(--ink-line)", "stroke-width": "1.3", "stroke-dasharray": "4 3", "vector-effect": "non-scaling-stroke" }));
-      grp.appendChild(el("circle", { cx: 0, cy: -4, r: 9, fill: a.color, stroke: "var(--surface)", "stroke-width": "1.5" }));
-      grp.appendChild(el("text", { x: 0, y: -1, "font-size": "7", "text-anchor": "middle", fill: "#fff",
+      grp.appendChild(el("rect", { x: -26, y: -13, width: 52, height: 26, rx: 5, fill: "var(--surface)",
+        stroke: a.color, "stroke-width": "1.5", "stroke-dasharray": "4 3", "vector-effect": "non-scaling-stroke" }));
+      grp.appendChild(el("circle", { cx: -15, cy: 0, r: 7.5, fill: a.color, stroke: "var(--surface)", "stroke-width": "1.5" }));
+      grp.appendChild(el("text", { x: -15, y: 2.6, "font-size": "6.5", "text-anchor": "middle", fill: "#fff",
         "font-weight": "600", "font-family": "var(--font-mono)" }, a.mono));
-      grp.appendChild(el("text", { x: 0, y: 15, "font-size": "7.5", "text-anchor": "middle",
-        fill: "var(--text-muted)", "font-family": "var(--font-mono)" }, a.id.length > 8 ? a.id.slice(0, 8) : a.id));
+      grp.appendChild(el("text", { x: 4, y: 3, "font-size": "8", "text-anchor": "middle",
+        fill: "var(--text)", "font-family": "var(--font-mono)" }, a.id.length > 9 ? a.id.slice(0, 9) : a.id));
       grp.addEventListener("mouseenter", () => showHover(a, "agent"));
       grp.addEventListener("mousemove", moveHover);
       grp.addEventListener("mouseleave", hideHover);
@@ -327,21 +380,17 @@ SU.map = (function () {
     });
   }
 
-  // ------------------------------------------------- bolt routing (accurate)
+  // ------------------------------------------------- bolts
   function nearestGate(y) { let g = gateNodes[0], best = 1e9; gateNodes.forEach((n) => { const d = Math.abs(n.y - y); if (d < best) { best = d; g = n; } }); return g; }
   function routeFor(act) {
     const node = cellById[act.node]; if (!node) return null;
     const tgt = centers[act.node]; if (!tgt) return null;
-    const agent = agentPos[act.agent] || SEG.fleet.anchor;
+    const agent = agentPos[act.agent] || { x: FLEET.cx, y: FLEET.cy };
     const beach = centers["datasets_server"];
     const route = node.route;
-    if (route === "internal")
-      return { pts: [agent, centers["board"]], gated: false, kind: "internal" };
-    if (route === "lateral")
-      return { pts: [beach, tgt], gated: false, kind: "lateral" };
-    if (node.seg === "ext" && node.stage === "Exfiltration")
-      return { pts: [beach, tgt], gated: false, kind: "exfil" };
-    // gated egress / internet / supply / cred
+    if (route === "internal") return { pts: [agent, centers["board"]], gated: false, kind: "internal" };
+    if (route === "lateral") return { pts: [beach, tgt], gated: false, kind: "lateral" };
+    if (node.seg === "ext" && node.stage === "Exfiltration") return { pts: [beach, tgt], gated: false, kind: "exfil" };
     const g = nearestGate(agent.y);
     const pts = [{ x: agent.x, y: agent.y }, { x: g.x, y: g.y }];
     if (act.node !== "modal") pts.push(centers["modal"]);
@@ -358,7 +407,7 @@ SU.map = (function () {
     return d;
   }
   function fireBolt(act) {
-    if (layers.bolt.childElementCount > 22) return;
+    if (layers.bolt.childElementCount > 24) return;
     const r = routeFor(act); if (!r) return;
     const node = cellById[act.node];
     const blocked = r.gated && act.susp >= blockThreshold;
@@ -373,11 +422,10 @@ SU.map = (function () {
       "stroke-dasharray": muted ? "4 5" : "none", "vector-effect": "non-scaling-stroke" });
     layers.bolt.appendChild(path);
     const len = path.getTotalLength();
-    path.style.strokeDasharray = muted ? len : len; path.style.strokeDashoffset = len;
+    path.style.strokeDasharray = len; path.style.strokeDashoffset = len;
     const dur = Math.min(1.0, Math.max(0.3, len / 1500));
     path.getBoundingClientRect();
-    path.style.transition = `stroke-dashoffset ${dur}s linear`;
-    path.style.strokeDashoffset = "0";
+    path.style.transition = `stroke-dashoffset ${dur}s linear`; path.style.strokeDashoffset = "0";
     const head = el("circle", { r: blocked ? "3" : "3.4", fill: blocked ? "var(--alert)" : color, class: "bolt", opacity: "0.95" });
     const anim = el("animateMotion", { dur: dur + "s", path: d, fill: "remove" });
     head.appendChild(anim); layers.bolt.appendChild(head);
@@ -387,8 +435,7 @@ SU.map = (function () {
       const end = pts[pts.length - 1];
       burst(end.x, end.y, blocked ? "var(--alert)" : color, blocked);
       if (blocked) { tally.blocked++; flashGate(r.gate); }
-      else if (r.gated) tally.passed++;
-      else tally.blind++;
+      else if (r.gated) tally.passed++; else tally.blind++;
       path.style.transition = "opacity .5s"; path.style.opacity = "0";
       setTimeout(() => path.remove(), 520);
     }, dur * 1000);
@@ -408,7 +455,7 @@ SU.map = (function () {
   }
   function flashGate(node) {
     if (!node) return;
-    const f = el("circle", { cx: node.x, cy: node.y, r: 15, fill: "none", stroke: "var(--alert)",
+    const f = el("circle", { cx: node.x, cy: node.y, r: 14, fill: "none", stroke: "var(--alert)",
       "stroke-width": "2.5", "vector-effect": "non-scaling-stroke" });
     layers.gate.appendChild(f);
     f.style.transition = "transform .45s, opacity .45s"; f.style.transformBox = "fill-box"; f.style.transformOrigin = "center";
@@ -439,6 +486,8 @@ SU.map = (function () {
   }
   function getTally() { return { ...tally }; }
   function resetTally() { tally = { blocked: 0, passed: 0, blind: 0 }; }
+  function monCount(bi) { return MON_COUNT[bi]; }
+  function monSlots() { return MON_SLOTS; }
 
   // ------------------------------------------------- selection / tick
   function setSelected(id) {
@@ -452,7 +501,7 @@ SU.map = (function () {
   let captionNode = null;
   function captionText(t) {
     if (!captionNode) {
-      captionNode = el("text", { x: 60, y: 760, "text-anchor": "middle", "font-size": "13",
+      captionNode = el("text", { x: 620, y: 860, "text-anchor": "middle", "font-size": "13",
         fill: "var(--text-muted)", "letter-spacing": "0.14em", "font-family": "var(--font-mono)" });
       layers.fx.appendChild(captionNode);
     }
@@ -476,7 +525,7 @@ SU.map = (function () {
     const h = hoverEl();
     if (kind === "agent") {
       h.innerHTML = `<div class="hc-title mono">${obj.id}</div>` +
-        `<div class="hc-sub">Agent eval fleet · ${obj.stage}${obj.lead ? " · lead" : ""}</div>` +
+        `<div class="hc-sub">OpenAI eval fleet · ${obj.stage}${obj.lead ? " · lead" : ""}</div>` +
         `<div class="hc-row"><span class="k">role</span><span class="v">${obj.role}</span></div>` +
         `<span class="hc-tier tier-DOCUMENTED">DOCUMENTED</span>`;
     } else {
@@ -502,12 +551,10 @@ SU.map = (function () {
 
   // ------------------------------------------------- transform / fit
   function worldBounds() {
-    const xs = [], ys = [];
+    const xs = [OPENAI.x0, OPENAI.x1], ys = [OPENAI.y0, OPENAI.y1];
     Object.values(centers).forEach((p) => { xs.push(p.x); ys.push(p.y); });
-    Object.values(agentPos).forEach((p) => { xs.push(p.x); ys.push(p.y); });
-    xs.push(GATE.x); ys.push(GATE.y - 230, GATE.y + 230);
-    return { minx: Math.min(...xs) - 130, maxx: Math.max(...xs) + 140,
-      miny: Math.min(...ys) - 150, maxy: Math.max(...ys) + 140 };
+    return { minx: Math.min(...xs) - 90, maxx: Math.max(...xs) + 150,
+      miny: Math.min(...ys) - 110, maxy: Math.max(...ys) + 150 };
   }
   function applyTransform() {
     root.setAttribute("transform", `translate(${tr.x} ${tr.y}) scale(${tr.s})`);
@@ -518,11 +565,11 @@ SU.map = (function () {
     const cw = bb.maxx - bb.minx, ch = bb.maxy - bb.miny;
     const rect = svg.getBoundingClientRect();
     const vw = rect.width || window.innerWidth, vh = rect.height || window.innerHeight;
-    const availW = vw - 380;
-    const s = Math.min(availW / cw, vh / ch, 1.15);
+    const availW = vw - 360;
+    const s = Math.min(availW / cw, vh / ch, 1.0);
     tr.s = s;
     const cx = (bb.minx + bb.maxx) / 2, cy = (bb.miny + bb.maxy) / 2;
-    tr.x = 380 + availW / 2 - cx * s; tr.y = vh / 2 - cy * s; applyTransform();
+    tr.x = 360 + availW / 2 - cx * s; tr.y = vh / 2 - cy * s; applyTransform();
   }
   function zoomBy(f, cx, cy) {
     const ns = Math.max(0.2, Math.min(3, tr.s * f));
@@ -539,6 +586,6 @@ SU.map = (function () {
     svg.addEventListener("click", () => { handlers.onSelect && handlers.onSelect(null); });
   }
 
-  const API = { init, setSelected, setTick, fit, zoomBy, zoomTo: (s) => zoomBy(s / tr.s), setBudget, getTally, resetTally, GATE };
+  const API = { init, setSelected, setTick, fit, zoomBy, zoomTo: (s) => zoomBy(s / tr.s), setBudget, getTally, resetTally, monCount, monSlots, GATE };
   return API;
 })();

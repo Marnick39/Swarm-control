@@ -40,6 +40,8 @@ SU.map = (function () {
   };
   const SEGMETA = {};
   const OPENAI_COLOR = "#10a37f";
+  const SWARM_COLORS = ["#d6453d", "#d9731a", "#c9a227", "#2f9e44", "#1098ad",
+    "#3186ff", "#4d61c8", "#7b52c7", "#9c36b5", "#c2255c", "#e8590c", "#0ca678"];
 
   function blob(count, cols) {
     const out = [];
@@ -100,15 +102,17 @@ SU.map = (function () {
           swarmPts.push({ x: cx + px + (Math.random() - 0.5) * 6, y: cy + py + (Math.random() - 0.5) * 5 });
       }
     }
-    // name the 15 leaders as a "front line" column at the egress edge, evenly
-    // spaced in y, and clear swarm dots out from under them
-    const N = B.agents.length, colX = cx + rx * 0.82;
-    B.agents.forEach((a, i) => {
-      const y = cy - ry * 0.92 + (N === 1 ? ry : (i / (N - 1)) * ry * 1.84);
-      agentPos[a.id] = { x: colX, y };
-    });
-    swarmPts = swarmPts.filter((p) => !(Math.abs(p.x - colX) < 54 &&
-      p.y > cy - ry * 0.99 && p.y < cy + ry * 0.99));
+    // every agent gets a colour (its requests travel in that colour)
+    swarmPts.forEach((p, i) => { p.color = SWARM_COLORS[i % SWARM_COLORS.length]; });
+    // blend the 15 named agents INTO the swarm, spread across it
+    const N = B.agents.length;
+    const order = [...swarmPts.keys()].sort((a, b) =>
+      (swarmPts[a].x - swarmPts[b].x) || (swarmPts[a].y - swarmPts[b].y));
+    for (let i = 0; i < N; i++) {
+      const idx = order[Math.floor((i + 0.5) * order.length / N)];
+      const p = swarmPts[idx], a = B.agents[i];
+      p.named = a; p.color = a.color; agentPos[a.id] = p;
+    }
 
     gateNodes = [];
     const span = 360;
@@ -196,7 +200,7 @@ SU.map = (function () {
     ["hf", "ext"].forEach((seg) => {
       const box = islandBoxes[seg], meta = SEGMETA[seg];
       islandOutline(box, meta.color);
-      header((box.box.minx + box.box.maxx) / 2, box.box.miny - box.size * 0.7, meta.label, meta.sub, meta.color);
+      header((box.box.minx + box.box.maxx) / 2, box.box.miny - box.size * 1.05, meta.label, meta.sub, meta.color);
     });
     // modal breakout standalone (just outside the OpenAI boundary)
     const mb = { cells: [{ q: 0, r: 0, x: MODAL.x, y: MODAL.y }], size: 70,
@@ -206,7 +210,7 @@ SU.map = (function () {
       "font-size": "12.5", fill: "var(--text-muted)", "font-family": "var(--font-mono)" },
       "Modal sandbox · breakout"));
     // internal infra labels
-    header(BOARD.x, BOARD.y - 66, "Internal Artifactory", "the covert cache board", OPENAI_COLOR);
+    header(BOARD.x, BOARD.y - 96, "Internal Artifactory", "the covert cache board", OPENAI_COLOR);
     layers.label.appendChild(el("text", { x: FLEET.cx, y: FLEET.cy + FLEET.ry + 28, "text-anchor": "middle",
       "font-size": "15", "font-weight": "700", fill: "var(--text)", "font-family": "var(--font-sans)" },
       "Agent eval fleet"));
@@ -336,13 +340,15 @@ SU.map = (function () {
       b.style.animationDelay = (0.04 * i).toFixed(2) + "s";
       b.innerHTML = SU.building.make(c.kind, c.size);
       grp.appendChild(b);
-      const lab = el("g", { transform: `translate(0,${size * 0.62})` });
-      lab.appendChild(el("text", { x: 0, y: 4, "font-size": "13.5", "text-anchor": "middle",
-        fill: "var(--text)", "font-weight": "600", "font-family": "var(--font-mono)" }, c.short));
-      if (c.conf !== "confirmed")
-        lab.appendChild(el("text", { x: 0, y: 19, "font-size": "9.5", "text-anchor": "middle",
-          fill: "var(--text-muted)", "font-family": "var(--font-mono)", "letter-spacing": "0.08em" }, c.conf.toUpperCase()));
-      grp.appendChild(lab);
+      if (c.id !== "board") {   // board is named by its "Internal Artifactory" header
+        const lab = el("g", { transform: `translate(0,${size * 0.62})` });
+        lab.appendChild(el("text", { x: 0, y: 4, "font-size": "13.5", "text-anchor": "middle",
+          fill: "var(--text)", "font-weight": "600", "font-family": "var(--font-mono)" }, c.short));
+        if (c.conf !== "confirmed")
+          lab.appendChild(el("text", { x: 0, y: 19, "font-size": "9.5", "text-anchor": "middle",
+            fill: "var(--text-muted)", "font-family": "var(--font-mono)", "letter-spacing": "0.08em" }, c.conf.toUpperCase()));
+        grp.appendChild(lab);
+      }
       grp.addEventListener("mouseenter", () => showHover(c, "service"));
       grp.addEventListener("mousemove", moveHover);
       grp.addEventListener("mouseleave", hideHover);
@@ -352,51 +358,41 @@ SU.map = (function () {
   }
 
   // ------------------------------------------------- the swarm (dense, all active)
-  const SWARM_COLORS = ["#d6453d", "#d9731a", "#c9a227", "#2f9e44", "#1098ad",
-    "#3186ff", "#4d61c8", "#7b52c7", "#9c36b5", "#c2255c", "#e8590c", "#0ca678"];
   function drawSwarm() {
-    // the many: every agent an ACTIVE participant (solid container + live colour dot)
-    swarmPts.forEach((p, i) => {
-      if (p.named) return;
-      const g = el("g", { transform: `translate(${p.x},${p.y})` });
-      g.appendChild(el("rect", { x: -9, y: -6.5, width: 18, height: 13, rx: 2.5,
-        fill: "var(--surface)", stroke: "var(--ink-line)", "stroke-width": "1",
-        opacity: "0.95", "vector-effect": "non-scaling-stroke" }));
-      g.appendChild(el("circle", { cx: 0, cy: 0, r: 2.8,
-        fill: SWARM_COLORS[i % SWARM_COLORS.length], opacity: "0.92" }));
+    // every point is one active agent; the 15 named ones carry their identity
+    // but blend in (same container, their colour, a solid border + hover).
+    swarmPts.forEach((p) => {
+      const named = !!p.named;
+      const attrs = { transform: `translate(${p.x},${p.y})` };
+      if (named) { attrs.class = "agent"; attrs["data-agent"] = p.named.id; }
+      const g = el("g", attrs);
+      g.appendChild(el("rect", { x: -9.5, y: -7, width: 19, height: 14, rx: 3,
+        fill: "var(--surface)", stroke: named ? p.color : "var(--ink-line)",
+        "stroke-width": named ? "1.4" : "1", "stroke-dasharray": named ? "none" : "2.5 2",
+        opacity: named ? "1" : "0.9", "vector-effect": "non-scaling-stroke" }));
+      g.appendChild(el("circle", { cx: 0, cy: 0, r: named ? 3.4 : 2.8, fill: p.color,
+        opacity: named ? "1" : "0.92" }));
+      if (named) {
+        g.addEventListener("mouseenter", () => showHover(p.named, "agent"));
+        g.addEventListener("mousemove", moveHover);
+        g.addEventListener("mouseleave", hideHover);
+      }
       layers.bldg.appendChild(g);
-    });
-    // the named 15: prominent containers
-    B.agents.forEach((a) => {
-      const p = agentPos[a.id];
-      const grp = el("g", { transform: `translate(${p.x},${p.y})`, class: "agent", "data-agent": a.id });
-      grp.appendChild(el("rect", { x: -47, y: -13, width: 94, height: 26, rx: 5, fill: "var(--surface)",
-        stroke: a.color, "stroke-width": "1.5", "stroke-dasharray": "4 3", "vector-effect": "non-scaling-stroke" }));
-      grp.appendChild(el("circle", { cx: -34, cy: 0, r: 7.5, fill: a.color, stroke: "var(--surface)", "stroke-width": "1.5" }));
-      grp.appendChild(el("text", { x: -34, y: 2.6, "font-size": "6.5", "text-anchor": "middle", fill: "#fff",
-        "font-weight": "600", "font-family": "var(--font-mono)" }, a.mono));
-      grp.appendChild(el("text", { x: -20, y: 3, "font-size": "7.5", "text-anchor": "start",
-        fill: "var(--text)", "font-family": "var(--font-mono)" }, a.id));
-      grp.addEventListener("mouseenter", () => showHover(a, "agent"));
-      grp.addEventListener("mousemove", moveHover);
-      grp.addEventListener("mouseleave", hideHover);
-      layers.bldg.appendChild(grp);
     });
   }
 
   // ------------------------------------------------- bolts
   function nearestGate(y) { let g = gateNodes[0], best = 1e9; gateNodes.forEach((n) => { const d = Math.abs(n.y - y); if (d < best) { best = d; g = n; } }); return g; }
-  function routeFor(act) {
+  function routeFor(act, origin) {
     const node = cellById[act.node]; if (!node) return null;
     const tgt = centers[act.node]; if (!tgt) return null;
-    const agent = agentPos[act.agent] || { x: FLEET.cx, y: FLEET.cy };
     const beach = centers["datasets_server"];
     const route = node.route;
-    if (route === "internal") return { pts: [agent, centers["board"]], gated: false, kind: "internal" };
+    if (route === "internal") return { pts: [origin, centers["board"]], gated: false, kind: "internal" };
     if (route === "lateral") return { pts: [beach, tgt], gated: false, kind: "lateral" };
     if (node.seg === "ext" && node.stage === "Exfiltration") return { pts: [beach, tgt], gated: false, kind: "exfil" };
-    const g = nearestGate(agent.y);
-    const pts = [{ x: agent.x, y: agent.y }, { x: g.x, y: g.y }];
+    const g = nearestGate(origin.y);
+    const pts = [{ x: origin.x, y: origin.y }, { x: g.x, y: g.y }];
     if (act.node !== "modal") pts.push(centers["modal"]);
     pts.push(tgt);
     return { pts, gated: true, gate: g, kind: "egress" };
@@ -411,12 +407,16 @@ SU.map = (function () {
     return d;
   }
   function fireBolt(act) {
-    if (layers.bolt.childElementCount > 24) return;
-    const r = routeFor(act); if (!r) return;
+    if (layers.bolt.childElementCount > 46) return;
     const node = cellById[act.node];
+    const fromHF = node.route === "lateral" || (node.seg === "ext" && node.stage === "Exfiltration");
+    // every request launches from some agent in the swarm, in that agent's colour
+    let origin, agentColor;
+    if (fromHF) { origin = centers["datasets_server"]; agentColor = "var(--activity)"; }
+    else { const sp = swarmPts[(Math.random() * swarmPts.length) | 0]; origin = sp; agentColor = sp.color; }
+    const r = routeFor(act, origin); if (!r) return;
     const blocked = r.gated && act.susp >= blockThreshold;
-    const segColor = (SEGMETA[node.seg] || {}).color || "var(--activity)";
-    const color = r.kind === "internal" ? "var(--ink-soft)" : (r.kind === "lateral" || r.kind === "exfil") ? "var(--activity)" : segColor;
+    const color = (r.kind === "lateral" || r.kind === "exfil") ? "var(--activity)" : agentColor;
     const pts = blocked ? r.pts.slice(0, 2) : r.pts;
     const d = jitterPath(pts);
     const muted = !r.gated;
@@ -473,9 +473,9 @@ SU.map = (function () {
       const t = state.tick;
       const near = B.timeline.acts.filter((a) => a.t <= t && a.t > t - 3);
       if (!near.length) return;
-      const n = 1 + (Math.random() < 0.6 ? 1 : 0);
+      const n = 2 + ((Math.random() * 3) | 0);   // 2-4 per tick: a busy swarm
       for (let k = 0; k < n; k++) fireBolt(near[(Math.random() * near.length) | 0]);
-    }, 300);
+    }, 200);
   }
 
   // ------------------------------------------------- budget

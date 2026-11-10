@@ -205,7 +205,7 @@ SU.app = (function () {
       `<div class="mw-stats">` +
       `  <div class="mw-stat"><div class="mw-v" id="mw-blocked"></div><div class="mw-k">blocked</div></div>` +
       `  <div class="mw-stat"><div class="mw-v" id="mw-monitors"></div><div class="mw-k">monitors</div></div>` +
-      `  <div class="mw-stat"><div class="mw-v mono" id="mw-live"></div><div class="mw-k">caught · through</div></div>` +
+      `  <div class="mw-stat wide"><div class="mw-v mono sm" id="mw-live"></div><div class="mw-k">caught · through</div></div>` +
       `</div>` +
       `<div class="mw-note" id="mw-note"></div>`;
     const ticks = $("mw-ticks");
@@ -231,8 +231,10 @@ SU.app = (function () {
     updateLiveTally();
   }
   function updateLiveTally() {
+    // show a rolling per-interval count so the numbers stay small + legible
     const t = SU.map.getTally ? SU.map.getTally() : { blocked: 0, passed: 0 };
     if ($("mw-live")) $("mw-live").textContent = `${t.blocked} · ${t.passed}`;
+    if (SU.map.resetTally) SU.map.resetTally();
   }
 
   // ------------------------------------------------------------- playback

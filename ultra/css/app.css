@@ -345,8 +345,10 @@ button { font-family: inherit; color: inherit; }
 #mw-slider { width: 100%; accent-color: var(--select); margin: 2px 0; }
 .mw-ticks { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
 .mw-stats { display: flex; gap: 8px; margin: 11px 0 8px; }
-.mw-stat { flex: 1; text-align: center; border: 0.75px solid var(--rule); border-radius: 8px; padding: 7px 4px; }
-.mw-v { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.mw-stat { flex: 1; text-align: center; border: 0.75px solid var(--rule); border-radius: 8px; padding: 7px 4px; min-width: 0; }
+.mw-stat.wide { flex: 1.55; }
+.mw-v { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mw-v.sm { font-size: 15px; }
 .mw-k { font-size: 9.5px; color: var(--text-muted); margin-top: 1px; letter-spacing: .02em; }
 .mw-note { font-size: 10.5px; color: var(--text-muted); line-height: 1.45; }
 .mw-note b { color: var(--activity); font-weight: 600; }

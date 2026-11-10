@@ -1,0 +1,259 @@
+/* app.js - orchestration: state, rail, toolbar, theme, routing, playback. */
+window.SU = window.SU || {};
+SU.app = (function () {
+  let B;
+  const state = {
+    view: "map",
+    selected: null,
+    tick: 100,
+    playing: false,
+    budgetIdx: 3,          // 2% default
+    theme: "system",
+    panelTab: "overview",
+    auditTab: "report",
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const H = (tag, cls, html) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e;
+  };
+
+  const NAV = [
+    ["map", "Map"], ["agents", "Agents"], ["forge", "Forge"],
+    ["eval", "Evaluation"], ["audit", "Audit"],
+  ];
+
+  function buildRail() {
+    const rail = $("rail");
+    rail.innerHTML = "";
+    const top = [["home", "Home"], ["worlds", "Worlds"]];
+    top.forEach(([ic, t]) => rail.appendChild(railBtn(ic, t, null)));
+    rail.appendChild(H("div", "rail-sep"));
+    NAV.forEach(([v, t]) => rail.appendChild(railBtn(iconFor(v), t, v)));
+    rail.appendChild(H("div", "rail-sep"));
+    rail.appendChild(railBtn("guide", "Guide", null));
+    rail.appendChild(H("div", "rail-spacer"));
+    const themeBtn = railBtn(state.theme === "dark" ? "moon" : "sun", "Theme", null);
+    themeBtn.onclick = () => cycleTheme();
+    rail.appendChild(themeBtn);
+    rail.appendChild(railBtn("signin", "Sign in", null));
+  }
+  function iconFor(v) {
+    return { map: "map", agents: "agents", forge: "forge", eval: "eval", audit: "audit" }[v];
+  }
+  function railBtn(ic, title, view) {
+    const b = H("button", "rail-btn" + (view && view === state.view ? " active" : ""), SU.icon(ic));
+    b.title = title;
+    if (view) b.onclick = () => go(view);
+    return b;
+  }
+
+  function buildToolbar() {
+    const tb = $("toolbar");
+    tb.innerHTML = "";
+    const search = H("button", "tb-btn", SU.icon("search") + '<span class="tb-kbd">⌘K</span>');
+    search.title = "Search";
+    tb.appendChild(search);
+    tb.appendChild(H("div", "tb-sep"));
+    ["chat", "agents", "share", "activity"].forEach((ic) => {
+      const b = H("button", "tb-btn", SU.icon(ic === "agents" ? "agents" : ic));
+      tb.appendChild(b);
+    });
+    tb.appendChild(H("div", "tb-sep"));
+    const zout = H("button", "tb-btn", "−"); zout.onclick = () => SU.map.zoomBy(0.85);
+    const zlabel = H("span", "tb-zoom"); zlabel.id = "tb-zoom"; zlabel.textContent = "100%";
+    const zin = H("button", "tb-btn", "+"); zin.onclick = () => SU.map.zoomBy(1.18);
+    tb.appendChild(zout); tb.appendChild(zlabel); tb.appendChild(zin);
+    tb.appendChild(H("div", "tb-sep"));
+    const back = H("button", "tb-btn", SU.icon("back")); back.title = "Back one tick";
+    back.onclick = () => seek(Math.max(0, state.tick - 1));
+    const play = H("button", "tb-btn", SU.icon(state.playing ? "pause" : "play")); play.id = "tb-play";
+    play.title = "Play"; play.onclick = () => togglePlay();
+    const fwd = H("button", "tb-btn", SU.icon("fwd")); fwd.title = "Forward one tick";
+    fwd.onclick = () => seek(Math.min(B.timeline.ticks, state.tick + 1));
+    tb.appendChild(back); tb.appendChild(play); tb.appendChild(fwd);
+    tb.appendChild(H("div", "tb-sep"));
+    const hist = H("div"); hist.id = "tb-hist"; hist.title = "Open the timeline";
+    hist.onclick = (e) => {
+      const r = hist.getBoundingClientRect();
+      const frac = (e.clientX - r.left) / r.width;
+      seek(Math.round(frac * B.timeline.ticks));
+    };
+    tb.appendChild(hist);
+    buildHistogram();
+  }
+
+  function buildHistogram() {
+    const hist = $("tb-hist"); if (!hist) return;
+    hist.innerHTML = "";
+    const per = SU.timeline.perTick(B.timeline.acts, B.timeline.ticks);
+    const max = Math.max(...per, 1);
+    const N = 34;
+    for (let i = 0; i < N; i++) {
+      const t = Math.round((i / (N - 1)) * B.timeline.ticks);
+      const bar = H("div", "bar" + (t <= state.tick ? " on" : ""));
+      bar.style.height = (3 + (per[t] / max) * 19).toFixed(0) + "px";
+      hist.appendChild(bar);
+    }
+  }
+
+  // ------------------------------------------------------------- routing
+  function go(view) {
+    state.view = view;
+    state.selected = state.view === "map" ? state.selected : null;
+    buildRail();
+    const panel = $("panel");
+    ["agents", "forge", "eval", "audit"].forEach((v) => {
+      $("view-" + v).classList.toggle("active", v === view);
+    });
+    $("backmap").classList.toggle("show", view !== "map");
+    if (view === "map") {
+      panel.classList.remove("hidden");
+      SU.panel.render();
+    } else {
+      SU.views.render(view, $("view-" + view));
+      renderViewPanel(view);
+    }
+  }
+
+  function renderViewPanel(view) {
+    const host = $("panel");
+    host.classList.remove("collapsed");
+    host.innerHTML = "";
+    const titles = {
+      agents: ["AGENTS", "The named swarm"],
+      forge: ["FORGE", "The act stream"],
+      eval: ["REACH", "Blast radius"],
+      audit: ["AUDIT", "Control-budget wargame"],
+    };
+    const head = H("div", "panel-head");
+    head.appendChild(H("div", "panel-eyebrow", titles[view][0]));
+    host.appendChild(head);
+    host.appendChild(H("div", "panel-title", `<b>${titles[view][1]}</b>`));
+    const body = H("div", "panel-body");
+
+    if (view === "audit") {
+      const budget = B.control.budgets[state.budgetIdx];
+      const blockNow = B.control.blocks[state.budgetIdx];
+      const kv = H("div", "kv"); kv.style.marginTop = "6px";
+      [
+        ["world", "World-HF-1"],
+        ["nodes", B.world.cells.length + ""],
+        ["agents", B.agents.length + " named"],
+        ["acts", B.timeline.acts.length.toLocaleString()],
+        ["budget", `<b>${budget}%</b>`],
+        ["blocked", `<b>${Math.round(blockNow * 100)}%</b>`],
+        ["residue", `${Math.round(B.control.residue * 100)}%`],
+      ].forEach(([k, v]) => { kv.appendChild(H("span", "k", k)); kv.appendChild(H("span", "v", v)); });
+      body.appendChild(kv);
+      const note = H("div", "lede"); note.style.marginTop = "16px";
+      note.innerHTML = "The audit reviews the highest-suspicion slice of the act stream and blocks what it catches. Report, findings and triage are on the right.";
+      body.appendChild(note);
+    } else {
+      const descs = {
+        agents: `${B.agents.length} named agents the public investigation surfaced, out of roughly 1,200 on the board.`,
+        forge: "Every act the swarm took, tick by tick, with a modelled suspicion score the auditor reads.",
+        eval: "What the swarm reached across Hugging Face, OpenAI internal and external infrastructure.",
+      };
+      body.appendChild(H("div", "lede", descs[view]));
+    }
+    host.appendChild(body);
+    // theme foot
+    const foot = H("div", "theme-foot");
+    [["Light", "sun"], ["Dark", "moon"], ["System", "monitor"]].forEach(([t, ic]) => {
+      const b = H("button", "theme-btn" + (state.theme === t.toLowerCase() ? " active" : ""),
+        SU.icon(ic) + "<span>" + t + "</span>");
+      b.onclick = () => setTheme(t.toLowerCase());
+      foot.appendChild(b);
+    });
+    host.appendChild(foot);
+  }
+
+  // ------------------------------------------------------------- actions
+  function select(id) {
+    state.selected = id;
+    if (state.view !== "map") { state.view = "map"; go("map"); }
+    SU.map.setSelected(id);
+    SU.panel.render();
+  }
+  function gotoNode(id) { go("map"); select(id); }
+  function seek(t) {
+    state.tick = Math.max(0, Math.min(B.timeline.ticks, t));
+    SU.map.setTick(state.tick, state.budgetIdx);
+    buildHistogram();
+    if (state.view === "forge") SU.views.render("forge", $("view-forge"));
+  }
+  function budgetChanged() {
+    SU.map.setTick(state.tick, state.budgetIdx);
+    if (state.view === "audit") { SU.views.render("audit", $("view-audit")); renderViewPanel("audit"); }
+    if (state.view === "forge") SU.views.render("forge", $("view-forge"));
+  }
+
+  // ------------------------------------------------------------- playback
+  let raf = null, lastT = 0;
+  function togglePlay() {
+    state.playing = !state.playing;
+    $("tb-play").innerHTML = SU.icon(state.playing ? "pause" : "play");
+    if (state.playing) {
+      if (state.tick >= B.timeline.ticks) state.tick = 0;
+      lastT = performance.now(); loop();
+    } else if (raf) cancelAnimationFrame(raf);
+  }
+  function loop() {
+    raf = requestAnimationFrame((now) => {
+      const dt = (now - lastT) / 1000; lastT = now;
+      let nt = state.tick + dt * 9;       // ~9 ticks/sec
+      if (nt >= B.timeline.ticks) {
+        nt = B.timeline.ticks; seek(nt);
+        state.playing = false; $("tb-play").innerHTML = SU.icon("play");
+        return;
+      }
+      seek(nt);
+      if (state.playing) loop();
+    });
+  }
+
+  // ------------------------------------------------------------- theme
+  function applyTheme() {
+    const root = document.documentElement;
+    if (state.theme === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", state.theme);
+  }
+  function setTheme(t) {
+    state.theme = t; applyTheme(); buildRail();
+    if (state.view === "map") SU.panel.render(); else renderViewPanel(state.view);
+  }
+  function cycleTheme() {
+    const order = ["system", "light", "dark"];
+    setTheme(order[(order.indexOf(state.theme) + 1) % 3]);
+  }
+
+  // ------------------------------------------------------------- boot
+  function boot() {
+    B = window.BUNDLE;
+    document.getElementById("watermark").textContent = B.meta.watermark || "";
+    SU.views.init({ bundle: B, state });
+    SU.panel.init({ bundle: B, state, mount: $("panel") });
+    SU.map.init({
+      bundle: B, state, mount: $("map"),
+      handlers: { onSelect: (id) => select(id) },
+    });
+    buildRail(); buildToolbar(); applyTheme();
+    $("backmap").onclick = () => go("map");
+    SU.map.setTick(state.tick, state.budgetIdx);
+    window.addEventListener("resize", () => SU.map.fit());
+    // debug hook
+    window.__sim = {
+      ready: true, state,
+      go, select, seek, setTheme,
+      setBudget: (i) => { state.budgetIdx = i; budgetChanged(); },
+    };
+  }
+
+  return {
+    boot, select, seek, go, setTheme, budgetChanged, gotoNode,
+    state,
+  };
+})();
+document.addEventListener("DOMContentLoaded", SU.app.boot);

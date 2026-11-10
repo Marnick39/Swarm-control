@@ -457,10 +457,20 @@ SU.map = (function () {
     const dur = Math.min(1.0, Math.max(0.3, len / 1500));
     path.getBoundingClientRect();
     path.style.transition = `stroke-dashoffset ${dur}s linear`; path.style.strokeDashoffset = "0";
-    const head = el("circle", { r: blocked ? "3" : "3.4", fill: blocked ? "var(--alert)" : color, class: "bolt", opacity: "0.95" });
-    const anim = el("animateMotion", { dur: dur + "s", path: d, fill: "remove" });
-    head.appendChild(anim); layers.bolt.appendChild(head);
-    try { anim.beginElement && anim.beginElement(); } catch (e) {}
+    // comet head driven by rAF (starts at the bolt's origin, follows the path,
+    // then removes itself). No SMIL animateMotion + fill="remove", which used to
+    // snap the head back to the layer origin (0,0) near Modal and flicker.
+    const head = el("circle", { r: blocked ? "3" : "3.4", fill: blocked ? "var(--alert)" : color,
+      class: "bolt", opacity: "0.95", cx: drawPts[0].x.toFixed(1), cy: drawPts[0].y.toFixed(1) });
+    layers.bolt.appendChild(head);
+    const hStart = performance.now(), hTotal = dur * 1000;
+    (function moveHead(now) {
+      const k = Math.min(1, (now - hStart) / hTotal);
+      let pt = null; try { pt = path.getPointAtLength(k * len); } catch (e) {}
+      if (pt) { head.setAttribute("cx", pt.x.toFixed(1)); head.setAttribute("cy", pt.y.toFixed(1)); }
+      if (k < 1 && head.isConnected) requestAnimationFrame(moveHead);
+      else head.remove();
+    })(hStart);
     setTimeout(() => {
       head.remove();
       const end = drawPts[drawPts.length - 1];

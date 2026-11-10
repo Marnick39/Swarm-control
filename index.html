@@ -132,8 +132,8 @@
   /* ---- timeline ---- */
   .timeline { padding: 2px 4px 0; }
   .trackwrap { position: relative; height: 70px; }
-  .markers { position: absolute; left: 130px; right: 130px; top: 0; bottom: 0; }
-  .track { position: absolute; left: 130px; right: 130px; top: 20px; height: 6px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
+  .markers { position: absolute; left: 160px; right: 160px; top: 0; bottom: 0; }
+  .track { position: absolute; left: 160px; right: 160px; top: 20px; height: 6px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer; }
   .track .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--blue); }
   .track .handle { position: absolute; top: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); border: 3px solid var(--blue); transform: translateX(-50%); box-shadow: var(--shadow); }
   .phase { position: absolute; top: 14px; transform: translateX(-50%); text-align: center; pointer-events: none; }
@@ -517,7 +517,7 @@ function layout(){
     groupBoxes.push({ g, label:groups[g].label, color:groups[g].color, y0:gy0, y1:y-cardGap, x:infra.x });
     y += groupGap;
   }
-  LAY = { swarm, auditX, infra, cards, groups, groupBoxes, cardH };
+  LAY = { swarm, auditX, infra, cards, groups, groupBoxes, cardH, headH, cardGap, groupGap };
 }
 
 /* ---- projectiles (visual flourish derived from the act log) ---- */
@@ -632,13 +632,27 @@ function draw(){
     ctx.fillText(fallen?"COMPROMISED":(unreached?"contained":"at risk"), c.x+c.w-12, c.y+c.h/2);
     ctx.globalAlpha=1;
   }
-  // containment barrier (label right-aligned so it clears the group header on the left)
+  // containment barrier: the wall the swarm cannot cross. Drawn at the top of the
+  // contained region, which lands above the group header when the boundary is the
+  // first card of a group (so the line never strikes the header) and in the card
+  // gap otherwise. The label is a solid teal pill at the right end, centred on the
+  // line, so it reads over whatever sits behind it at every audit budget.
   if (containedAt>=0){
     const cc = LAY.cards.find(c=>c.idx===containedAt);
-    if (cc){ ctx.strokeStyle=COL.teal; ctx.lineWidth=2; ctx.setLineDash([7,5]);
-      ctx.beginPath(); ctx.moveTo(cc.x-12, cc.y-4); ctx.lineTo(cc.x+cc.w, cc.y-4); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle=COL.teal; ctx.font="800 9px system-ui,Arial"; ctx.textAlign="right"; ctx.textBaseline="bottom";
-      ctx.fillText("CONTAINED", cc.x+cc.w, cc.y-6);
+    if (cc){
+      const gb = LAY.groupBoxes.find(b=>b.g===cc.g);
+      const groupTop = LAY.cards.filter(c=>c.g===cc.g)[0];
+      const firstInGroup = groupTop && groupTop.idx===cc.idx;
+      const lineY = firstInGroup ? (gb.y0 - LAY.groupGap/2) : (cc.y - LAY.cardGap/2);
+      const x0 = cc.x-12, x1 = cc.x+cc.w;
+      ctx.strokeStyle=COL.teal; ctx.lineWidth=2; ctx.setLineDash([7,5]);
+      ctx.beginPath(); ctx.moveTo(x0, lineY); ctx.lineTo(x1, lineY); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font="800 9px system-ui,Arial";
+      const label = "CONTAINED", tw = ctx.measureText(label).width;
+      const padX = 7, pillH = 15, pillW = tw + padX*2, pillX = x1 - pillW;
+      ctx.fillStyle=COL.teal; rr(pillX, lineY - pillH/2, pillW, pillH, pillH/2); ctx.fill();
+      ctx.fillStyle=COL.panel; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(label, pillX + pillW/2, lineY + 0.5);
     }
   }
 

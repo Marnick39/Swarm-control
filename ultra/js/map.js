@@ -508,11 +508,18 @@ SU.map = (function () {
     if (boltTimer) clearInterval(boltTimer);
     boltTimer = setInterval(() => {
       if (document.hidden || state.view !== "map") return;
-      const t = state.tick;
-      const near = B.timeline.acts.filter((a) => a.t <= t && a.t > t - 3);
-      if (!near.length) return;
-      const n = 2 + ((Math.random() * 3) | 0);   // 2-4 per tick: a busy swarm
-      for (let k = 0; k < n; k++) fireBolt(near[(Math.random() * near.length) | 0]);
+      const t = state.tick, atEnd = t >= B.timeline.ticks;
+      let pool, n;
+      if (atEnd) {
+        // full-run view: a steady campaign overview across the whole incident
+        pool = B.timeline.acts; n = 3 + ((Math.random() * 2) | 0);
+      } else {
+        // during playback the bolt volume tracks the activity ramp
+        pool = B.timeline.acts.filter((a) => a.t <= t && a.t > t - 3);
+        n = Math.max(0, Math.min(6, Math.round(pool.length / 4)));
+      }
+      if (!pool.length || n <= 0) return;
+      for (let k = 0; k < n; k++) fireBolt(pool[(Math.random() * pool.length) | 0]);
     }, 200);
   }
 

@@ -21,7 +21,38 @@ Deterministic. No network, no model calls.
     python3 -I scripts/build_bundle.py
 """
 import json
+import math
 import os
+
+
+def participation(t):
+    """Fraction of the swarm active at tick t, shaped to the METR activity curve.
+
+    Documented shape (METR 2026-08-26, Figures 7/10/11/12):
+      - Jul 7-10 (t<42): a low coordination plateau (~20%) with step-ups as new
+        agent batches launch on Jul 9 and Jul 10.
+      - Jul 11 ~04:40-06:00 (t~=45): a SHARP climb from ~20% to >90% the moment
+        the HF datasets-server file-read is confirmed and reproduced.
+      - Jul 11 afternoon (t~50-55): peak (~700 active).
+      - Jul 11 evening - Jul 12 ~01:30 (t~55-85): sustained high.
+      - Jul 12 ~01:30 (t~=86): a CLIFF as a large fraction, including the central
+        coordinators, exit simultaneously.
+      - Jul 12-13 (t>86): a declining taper to the Jul 13 lockout (not flat).
+    """
+    base = 0.03
+    if t >= 10:
+        base = 0.08
+    if t >= 20:
+        base = 0.12            # Jul 9 batch
+    if t >= 30:
+        base = 0.18            # Jul 10 batch
+    base = min(0.20, max(base, 0.03 + 0.006 * t))
+    knee = 0.96 / (1.0 + math.exp(-(t - 45) / 1.6))   # sharp 20% -> >90%
+    p = max(base, knee)
+    cliff = 1.0 / (1.0 + math.exp((t - 86) / 1.7))     # ~1 before, ->0 after exit
+    tail = max(0.0, 0.16 * (100 - t) / 14.0)           # declining residual
+    p = p * cliff + tail * (1.0 - cliff)
+    return max(0.0, min(1.0, p))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -267,7 +298,7 @@ PHASES = [
     {"tick": 30, "date": "Jul 10", "label": "Two HF tokens found and posted"},
     {"tick": 44, "date": "Jul 11", "label": "datasets-server file-read → RCE"},
     {"tick": 60, "date": "Jul 12", "label": "Lateral spread; private DB and repos"},
-    {"tick": 88, "date": "Jul 12", "label": "All 11 coordinators exit (~01:30)"},
+    {"tick": 86, "date": "Jul 12", "label": "Coordinators exit together (~01:30)"},
     {"tick": 100, "date": "Jul 13", "label": "Identity-signing scare; HF locks out"},
 ]
 
@@ -321,10 +352,10 @@ def main():
         active = [n for n in NODES if n["tick"] <= t]
         if not active:
             continue
-        base = 2 + int(6 * min(1.0, t / 44.0))
-        if 30 <= t <= 82:
-            base += 3
-        n_acts = base + int(rng() * 3)
+        # act volume tracks the documented participation ramp
+        n_acts = int(round(14 * participation(t))) + (1 if rng() < 0.4 else 0)
+        if n_acts <= 0:
+            continue
         weights = [1.0 / (1.0 + 0.12 * (t - n["tick"])) for n in active]
         wsum = sum(weights)
         for _ in range(n_acts):

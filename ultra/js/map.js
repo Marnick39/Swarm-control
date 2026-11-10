@@ -64,7 +64,7 @@ SU.map = (function () {
       .forEach((n) => { layers[n] = el("g", { "data-layer": n }); root.appendChild(layers[n]); });
     opts.mount.innerHTML = ""; opts.mount.appendChild(svg);
 
-    layout(); drawSea(); drawIslands(); drawLanes(); drawGate();
+    layout(); drawSea(); drawIslands(); drawLanes(); drawEdges(); drawGate();
     drawServices(); drawAgents(); bindInput(); fit();
     setBudget(state.budgetIdx); startBolts();
     return API;
@@ -184,6 +184,42 @@ SU.map = (function () {
     layers.lane.appendChild(el("path", { d: `M${x1} ${y1} L${x2} ${y2}`, fill: "none",
       stroke: "var(--ink-line)", "stroke-width": "2", "stroke-dasharray": dash,
       "stroke-linecap": "round", opacity: op, "vector-effect": "non-scaling-stroke" }));
+  }
+
+  // persistent service-to-service graph, styled by confidence
+  function drawEdges() {
+    const show = { reach: 1, lateral: 1, c2: 1, exfil: 1, supply: 1, cred: 1 };
+    B.world.edges.forEach((e) => {
+      if (!show[e.cls]) return;
+      const a = centers[e.from], b = centers[e.to];
+      if (!a || !b) return;
+      const dash = e.conf === "confirmed" ? "none" : e.conf === "likely" ? "6 6" : "2 7";
+      const op = e.conf === "confirmed" ? 0.42 : e.conf === "likely" ? 0.36 : 0.3;
+      const col = (e.cls === "exfil" || e.cls === "c2" || e.cls === "supply")
+        ? "var(--activity)" : (e.cls === "reach") ? "var(--alert)" : "var(--ink-soft)";
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 22;
+      layers.lane.appendChild(el("path", {
+        d: `M${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}`, fill: "none", stroke: col,
+        "stroke-width": e.cls === "reach" ? "1.8" : "1.4", "stroke-dasharray": dash,
+        opacity: op, "stroke-linecap": "round", "vector-effect": "non-scaling-stroke",
+        class: "svc-edge",
+      }));
+    });
+    // a small legend for confidence, in the sea under the gate
+    const lx = GATE.x - 150, ly = GATE.y + 250;
+    const leg = el("g", { transform: `translate(${lx},${ly})` });
+    const row = (y, dash, label) => {
+      leg.appendChild(el("path", { d: `M0 ${y} L26 ${y}`, stroke: "var(--ink-soft)",
+        "stroke-width": "1.5", "stroke-dasharray": dash, "vector-effect": "non-scaling-stroke" }));
+      leg.appendChild(el("text", { x: 32, y: y + 3.5, "font-size": "10.5",
+        fill: "var(--text-muted)", "font-family": "var(--font-mono)" }, label));
+    };
+    leg.appendChild(el("text", { x: 0, y: -10, "font-size": "10", fill: "var(--text-muted)",
+      "font-family": "var(--font-mono)", "letter-spacing": "0.1em" }, "EVIDENCE"));
+    row(6, "none", "confirmed (METR)");
+    row(22, "6 6", "likely (swarmtraces)");
+    row(38, "2 7", "candidate");
+    layers.lane.appendChild(leg);
   }
 
   // ------------------------------------------------- gate

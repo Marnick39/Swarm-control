@@ -379,6 +379,7 @@ button { font-family: inherit; color: inherit; }
   background: var(--surface); border: 1.5px solid var(--activity); border-radius: 10px;
   padding: 7px 13px; font-size: 12px; font-weight: 700; color: var(--activity);
   box-shadow: 0 1px 2px #0000000d, 0 8px 24px #0000000a;
+  pointer-events: auto; cursor: help;
 }
 #projection .pj-alarm.show { display: inline-flex; }
 #projection .pj-alarm .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--activity); animation: su-pulse-dot 1.4s infinite; }

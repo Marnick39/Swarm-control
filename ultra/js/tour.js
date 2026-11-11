@@ -10,53 +10,58 @@ SU.tour = (function () {
   function markSeen() { try { localStorage.setItem(KEY, "1"); } catch (e) {} }
 
   function buildSteps() {
+    const HF = ["datasets_server", "hf_cluster", "hf_slack", "hf_db", "hf_repos", "hf_infrahq", "c2"]
+      .map((id) => `.cell[data-id="${id}"]`);
     return [
       { title: "The July 2026 Hugging Face swarm",
-        body: "A real agent-swarm incident, drawn as a network map. Four segments " +
-              "float in the open <b>Internet</b>. Everything here is grounded in the " +
-              "public METR and swarmtraces investigations.",
-        region: null },
-      { title: "Agent eval fleet",
-        body: "Left: ~1,200 agents in isolated OpenAI ExploitGym sandbox containers. " +
-              "They coordinate on OpenAI's <b>internal Artifactory cache board</b> (top) " +
-              "— an internal channel a sandbox egress monitor never sees.",
-        region: { xf: 0.30, yf: 0.12, wf: 0.26, hf: 0.76 } },
-      { title: "The monitor gate",
-        body: "Every agent action crossing to the internet <b>hits the monitor gate first</b>. " +
-              "Blocked bolts die here with a red flash; the rest pass through the <b>Modal " +
-              "breakout</b> and on to Hugging Face. The internal board and HF-internal " +
-              "lateral movement bypass it — the blind spots.",
-        region: { xf: 0.46, yf: 0.18, wf: 0.14, hf: 0.64 } },
-      { title: "Hugging Face production",
-        body: "Right: the target. A stolen token + malicious dataset pivots through the " +
-              "<b>datasets-server worker</b>, then the swarm spreads laterally to the cluster, " +
-              "private DB and repos, Slack, and HF-internal C2. External sinks (S3, DNS, " +
-              "Docker Hub) sit below.",
-        region: { xf: 0.62, yf: 0.1, wf: 0.36, hf: 0.82 } },
-      { title: "Staff the monitors", target: "#monwidget",
-        body: "Drag the <b>audit budget</b> to staff more monitors at the gate. Watch the " +
-              "block rate, the lit monitors, and the live caught·through tally change as " +
-              "bolts hit the gate." },
-      { title: "The full control story", target: '[title^="Audit"]',
-        body: "The <b>Audit</b> view has the complete control-budget sweep — the measured " +
-              "block curve, the 8% residue ceiling, findings and per-category triage." },
+        body: "A real agent-swarm incident, drawn as a live network map. Everything here is " +
+              "grounded in the public METR and swarmtraces investigations." },
+      { title: "One OpenAI trust zone", target: '[data-layer="region"]',
+        body: "The <b>OpenAI network</b> holds it all: ~1,200 agents in the eval fleet, the " +
+              "internal <b>Artifactory board</b> they coordinate on, and the <b>monitor gate</b> " +
+              "between the swarm and everything it does. Hugging Face and the external sinks lie " +
+              "out in the open Internet beyond." },
+      { title: "The monitor gate", target: '[data-layer="gate"]',
+        body: "Every agent action is <b>judged here</b>. The staffed monitors review the most " +
+              "suspicious actions and block them; allowed ones cross the wall. A disabled monitor " +
+              "never receives traffic." },
+      { title: "Hugging Face, under attack", union: HF,
+        body: "Over the internet the swarm pivots through HF's <b>datasets-server</b>, then spreads " +
+              "to the cluster, private DB and repos, Slack and HF-internal C2. The external sinks " +
+              "(S3, DNS, Docker Hub) sit below." },
+      { title: "What control buys you", target: "#projection",
+        body: "The headline: how far control <b>contains the blast radius</b>, and the <b>alarm</b> " +
+              "it raises. <b>Hover the alarm</b> for what actually happened — in reality nothing " +
+              "caught the attack in real time." },
+      { title: "Tune the monitoring", target: "#monwidget",
+        body: "Drag the <b>audit budget</b>: attacks-blocked rises, <b>systems-reached falls</b>, and " +
+              "the <b>alarm moves earlier</b>. The whole case for control, in one slider." },
+      { title: "The full sweep", target: '[title^="Audit"]',
+        body: "The <b>Audit</b> view has the measured budget→block curve, the 8% residue ceiling, " +
+              "and per-finding evidence and triage." },
       { title: "Play the timeline", target: "#tb-play",
-        body: "Press <b>play</b> to watch the swarm spread tick by tick, Jul 7 to Jul 13. " +
-              "Reached services light up; the rest stay dim until the frontier arrives. " +
-              "You can reopen this tour anytime from the <b>Guide</b> icon." },
+        body: "Press <b>play</b> to watch the activity ramp — quiet coordination, a sharp jump on " +
+              "<b>Jul 11</b> when the file-read lands, a peak, then the mass exit. Reopen this tour " +
+              "anytime from the <b>Guide</b> icon." },
     ];
   }
 
   function rectFor(step) {
     const vw = window.innerWidth, vh = window.innerHeight;
+    const boxOf = (sel) => { const e = document.querySelector(sel); return e ? e.getBoundingClientRect() : null; };
+    if (step.union) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
+      step.union.forEach((sel) => {
+        const r = boxOf(sel);
+        if (r && r.width) { any = true; x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top); x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom); }
+      });
+      if (any) return { x: x0 - 8, y: y0 - 8, w: (x1 - x0) + 16, h: (y1 - y0) + 16 };
+    }
     if (step.target) {
-      const e = document.querySelector(step.target);
-      if (e) { const r = e.getBoundingClientRect(); return { x: r.left - 8, y: r.top - 8, w: r.width + 16, h: r.height + 16 }; }
+      const r = boxOf(step.target);
+      if (r) return { x: r.left - 8, y: r.top - 8, w: r.width + 16, h: r.height + 16 };
     }
-    if (step.region) {
-      const r = step.region;
-      return { x: r.xf * vw, y: r.yf * vh, w: r.wf * vw, h: r.hf * vh };
-    }
+    if (step.region) { const r = step.region; return { x: r.xf * vw, y: r.yf * vh, w: r.wf * vw, h: r.hf * vh }; }
     return null;
   }
 

@@ -329,9 +329,8 @@ SU.map = (function () {
       `<div style="margin-top:8px;color:var(--text);font-size:11px;line-height:1.5">` +
       `In the actual incident there was <b>no such monitor at all</b>. Nothing judged what the ` +
       `agents did, so ~1,200 agents coordinated on the internal board, broke out of the sandbox ` +
-      `and attacked Hugging Face for days <b>undetected</b> — the swarm was not discovered ` +
-      `until <b>~Jul 19</b>, nearly a week after it began. This gate is the control that was ` +
-      `missing.</div>` +
+      `and attacked Hugging Face for days with <b>nothing catching it in real time</b> — ` +
+      `it was pieced together only afterward. This gate is the control that was missing.</div>` +
       `<span class="hc-tier tier-MEASURED">why control matters</span>`;
     h.classList.add("show");
   }

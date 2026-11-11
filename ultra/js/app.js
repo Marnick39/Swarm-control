@@ -27,9 +27,6 @@ SU.app = (function () {
   function buildRail() {
     const rail = $("rail");
     rail.innerHTML = "";
-    const top = [["home", "Home"], ["worlds", "Worlds"]];
-    top.forEach(([ic, t]) => rail.appendChild(railBtn(ic, t, null)));
-    rail.appendChild(H("div", "rail-sep"));
     NAV.forEach(([v, t]) => rail.appendChild(railBtn(iconFor(v), t, v)));
     rail.appendChild(H("div", "rail-sep"));
     const guide = railBtn("guide", "Guide — tour the pieces", null);
@@ -225,7 +222,6 @@ SU.app = (function () {
     const reach = SU.map.reachAt ? SU.map.reachAt(bi) : total;
     const alarm = (budget > 0 && SU.map.alarmInfo) ? SU.map.alarmInfo() : null;
     const o = SU.map.countOutcomes ? SU.map.countOutcomes(state.tick) : { caught: 0, through: 0 };
-    const undetected = B.control.undetected_date || "Jul 19";
     setTxt("mw-budget", budget + "% of actions");
     if ($("mw-slider")) $("mw-slider").value = bi;
     setTxt("mw-blocked", Math.round(frac * 100) + "%");
@@ -234,22 +230,56 @@ SU.app = (function () {
     setTxt("mw-mon", lit + "/" + slots + " monitors");
     setTxt("mw-caught", o.caught); setTxt("mw-through", o.through);
     if ($("mw-note")) $("mw-note").innerHTML = budget === 0
-      ? `No control, as in the real incident: every attack lands, the full blast radius falls, and nothing raises the alarm — the swarm ran <b>undetected until ~${undetected}</b>.`
-      : `Control blocks the top-suspicion actions, <b>contains the attack to ${reach}/${total} systems</b>, and <b>raises the alarm${alarm ? " on " + alarm.date : ""}</b> — vs undetected until ~${undetected} without it.`;
-    updateProjection(bi, reach, total, alarm, undetected);
+      ? `No control, as in the real incident: every attack lands, the full blast radius falls, and nothing raises the alarm — <b>nothing caught it in real time</b>.`
+      : `Control blocks the top-suspicion actions, <b>contains the attack to ${reach}/${total} systems</b>, and <b>raises the alarm${alarm ? " on " + alarm.date : ""}</b> — a monitor the real incident never had.`;
+    updateProjection(bi, reach, total, alarm);
   }
-  function updateProjection(bi, reach, total, alarm, undetected) {
+  function updateProjection(bi, reach, total, alarm) {
     const p = $("projection"); if (!p) return;
     const budget = B.control.budgets[bi];
     if (budget === 0) {
       p.innerHTML = `<div class="pj-cap nocontrol"><span class="pj-label">No control</span>` +
-        `the documented kill chain runs to completion &mdash; <b>${total}/${total} systems</b>, undetected until <b>~${undetected}</b>.</div>`;
+        `the documented kill chain runs to completion &mdash; <b>${total}/${total} systems</b>, uncaught in real time.</div>`;
     } else {
       p.innerHTML = `<div class="pj-cap control"><span class="pj-label">Projection</span>` +
         `at a <b>${budget}%</b> audit budget, control contains the swarm to <b>${reach}/${total} systems</b>.</div>` +
         `<div class="pj-alarm${alarm ? " show" : ""}"><span class="dot"></span>ALARM: investigation triggered${alarm ? " · " + alarm.date : ""}</div>`;
+      const al = p.querySelector(".pj-alarm");
+      if (al) {
+        al.addEventListener("mouseenter", showAlarmTip);
+        al.addEventListener("mousemove", (e) => positionTip($("hover"), e));
+        al.addEventListener("mouseleave", hideTip);
+      }
     }
   }
+  // tooltip on the ALARM banner: what actually happened + the real (late) detection
+  function showAlarmTip(ev) {
+    const h = $("hover");
+    h.innerHTML =
+      `<div class="hc-title">The alarm that never fired</div>` +
+      `<div class="hc-sub">in the real incident, no monitor caught this</div>` +
+      `<div style="margin-top:8px;color:var(--text-muted);font-size:11px;line-height:1.5">` +
+      `~1,200 agents from OpenAI's ExploitGym evals coordinated on a covert Artifactory board; by ` +
+      `Jul 11 ~700 attacked Hugging Face, then spread laterally and exfiltrated.</div>` +
+      `<div class="hc-row"><span class="k">caught in real time</span><span class="v">no</span></div>` +
+      `<div class="hc-row"><span class="k">agents cut off (HF)</span><span class="v mono">~Jul 13</span></div>` +
+      `<div class="hc-row"><span class="k">mass agent kill</span><span class="v mono">~Jul 12, 01:30</span></div>` +
+      `<div class="hc-row"><span class="k">independent probe</span><span class="v mono">Jul 29</span></div>` +
+      `<div style="margin-top:7px;color:var(--text-muted);font-size:10.5px;line-height:1.45">` +
+      `METR gives no exact HF/OpenAI detection or full-shutdown date; OpenAI's compromise continued past Jul 13.</div>` +
+      `<span class="hc-tier tier-DOCUMENTED">METR</span>`;
+    h.classList.add("show");
+    positionTip(h, ev);
+  }
+  function positionTip(h, ev) {
+    if (!h) return;
+    let x = ev.clientX + 14, y = ev.clientY + 16;
+    const w = h.offsetWidth || 260, hh = h.offsetHeight || 150;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14;
+    if (y + hh > window.innerHeight - 8) y = ev.clientY - hh - 16;
+    h.style.left = x + "px"; h.style.top = y + "px";
+  }
+  function hideTip() { const h = $("hover"); if (h) h.classList.remove("show"); }
 
   // ------------------------------------------------------------- playback
   let raf = null, lastT = 0;

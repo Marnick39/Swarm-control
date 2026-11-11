@@ -455,7 +455,7 @@ def main():
         "budgets": BUDGETS, "blocks": BLOCKS, "residue": RESIDUE,
         "anchor_pct": 74, "anchor_budget": 2.0, "doc_detect_tick": 92,
         "alarm_blocked": 32, "reach": REACH, "nodes_total": N_NODES,
-        "undetected_date": "Jul 19", "findings": findings, "triage": triage,
+        "findings": findings, "triage": triage,
         "categories": CATEGORIES,
     }
 

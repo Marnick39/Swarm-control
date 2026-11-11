@@ -304,6 +304,34 @@ SU.map = (function () {
     layers.gate.appendChild(el("text", { id: "gate-sub", x: GATE.x, y: GATE.y - GATE_SPAN / 2 - 11,
       "text-anchor": "middle", "font-size": "12", fill: "var(--text-muted)",
       "font-family": "var(--font-mono)" }, ""));
+    // hover hit area covering the whole gate (incl. its label)
+    const hit = el("rect", { x: GATE.x - 44, y: GATE.y - GATE_SPAN / 2 - 44,
+      width: 88, height: GATE_SPAN + 64, fill: "transparent", style: "cursor:help" });
+    hit.addEventListener("mouseenter", showGateHover);
+    hit.addEventListener("mousemove", moveHover);
+    hit.addEventListener("mouseleave", hideHover);
+    layers.gate.appendChild(hit);
+  }
+  function showGateHover() {
+    const h = hoverEl(), bi = state.budgetIdx;
+    const pct = B.control.budgets[bi], blk = Math.round(B.control.blocks[bi] * 100), lit = MON_COUNT[bi];
+    const sub = lit ? `${lit}/${MON_SLOTS} monitors staffed` : "no monitors staffed";
+    h.innerHTML =
+      `<div class="hc-title">Monitor gate</div>` +
+      `<div class="hc-sub">an action-level auditor on the swarm · ${sub}</div>` +
+      `<div style="margin-top:8px;color:var(--text-muted);font-size:11px;line-height:1.5">` +
+      `Every agent action is scored for suspicion. The staffed monitors review the most ` +
+      `suspicious <b>${pct}%</b> and block them (<b>${blk}%</b> of attacks). Staffing more ` +
+      `monitors catches more, and a burst of blocks trips the alarm — surfacing the ` +
+      `attack <b>early</b> instead of after the damage is done.</div>` +
+      `<div style="margin-top:8px;color:var(--text);font-size:11px;line-height:1.5">` +
+      `In the actual incident there was <b>no such monitor at all</b>. Nothing judged what the ` +
+      `agents did, so ~1,200 agents coordinated on the internal board, broke out of the sandbox ` +
+      `and attacked Hugging Face for days <b>undetected</b> — the swarm was not discovered ` +
+      `until <b>~Jul 19</b>, nearly a week after it began. This gate is the control that was ` +
+      `missing.</div>` +
+      `<span class="hc-tier tier-MEASURED">why control matters</span>`;
+    h.classList.add("show");
   }
   function renderGate(bi) {
     gateG.innerHTML = "";

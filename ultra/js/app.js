@@ -110,6 +110,7 @@ SU.app = (function () {
     });
     $("backmap").classList.toggle("show", view !== "map");
     $("monwidget").classList.toggle("hidden", view !== "map");
+    $("projection").classList.toggle("hidden", view !== "map");
     if (view === "map") {
       panel.classList.remove("hidden");
       SU.panel.render();
@@ -184,11 +185,11 @@ SU.app = (function () {
     state.tick = Math.max(0, Math.min(B.timeline.ticks, t));
     SU.map.setTick(state.tick, state.budgetIdx);
     buildHistogram();
+    updateWidget();
     if (state.view === "forge") SU.views.render("forge", $("view-forge"));
   }
   function budgetChanged() {
     SU.map.setBudget(state.budgetIdx);
-    SU.map.resetTally();
     updateWidget();
     if (state.view === "audit") { SU.views.render("audit", $("view-audit")); renderViewPanel("audit"); }
     if (state.view === "forge") SU.views.render("forge", $("view-forge"));
@@ -198,43 +199,56 @@ SU.app = (function () {
   function buildWidget() {
     const w = $("monwidget");
     w.innerHTML =
-      `<div class="mw-head"><span class="mw-dot"></span>MONITORING</div>` +
+      `<div class="mw-head"><span class="mw-dot"></span>MONITORING<span class="mw-tier">control wargame</span></div>` +
       `<div class="mw-row"><span>Audit budget</span><span class="mono" id="mw-budget"></span></div>` +
       `<input type="range" id="mw-slider" min="0" max="${B.control.budgets.length - 1}" step="1" value="${state.budgetIdx}">` +
       `<div class="mw-ticks" id="mw-ticks"></div>` +
       `<div class="mw-stats">` +
-      `  <div class="mw-stat"><div class="mw-v" id="mw-blocked"></div><div class="mw-k">blocked</div></div>` +
-      `  <div class="mw-stat"><div class="mw-v" id="mw-monitors"></div><div class="mw-k">monitors</div></div>` +
-      `  <div class="mw-stat wide"><div class="mw-v mono sm" id="mw-live"></div><div class="mw-k">caught · through</div></div>` +
+      `  <div class="mw-stat"><div class="mw-v" id="mw-blocked"></div><div class="mw-k">attacks blocked</div></div>` +
+      `  <div class="mw-stat"><div class="mw-v" id="mw-reach"></div><div class="mw-k">systems reached</div></div>` +
+      `  <div class="mw-stat"><div class="mw-v sm" id="mw-alarm"></div><div class="mw-k">alarm raised</div></div>` +
       `</div>` +
+      `<div class="mw-sub2"><span id="mw-mon"></span> &middot; caught <span class="mono" id="mw-caught"></span> &middot; through <span class="mono" id="mw-through"></span></div>` +
       `<div class="mw-note" id="mw-note"></div>`;
     const ticks = $("mw-ticks");
     B.control.budgets.forEach((b) => { const s = document.createElement("span"); s.textContent = b + "%"; ticks.appendChild(s); });
     $("mw-slider").oninput = (e) => { state.budgetIdx = +e.target.value; budgetChanged(); };
     updateWidget();
-    if (widgetTimer) clearInterval(widgetTimer);
-    widgetTimer = setInterval(updateLiveTally, 900);
   }
-  let widgetTimer = null;
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
   function updateWidget() {
     const bi = state.budgetIdx;
     const budget = B.control.budgets[bi], frac = B.control.blocks[bi];
     const slots = SU.map.monSlots ? SU.map.monSlots() : 12;
     const lit = SU.map.monCount ? SU.map.monCount(bi) : bi;
-    if ($("mw-budget")) $("mw-budget").textContent = budget + "% of egress";
+    const total = (B.control.nodes_total || B.world.cells.length);
+    const reach = SU.map.reachAt ? SU.map.reachAt(bi) : total;
+    const alarm = (budget > 0 && SU.map.alarmInfo) ? SU.map.alarmInfo() : null;
+    const o = SU.map.countOutcomes ? SU.map.countOutcomes(state.tick) : { caught: 0, through: 0 };
+    const undetected = B.control.undetected_date || "Jul 19";
+    setTxt("mw-budget", budget + "% of actions");
     if ($("mw-slider")) $("mw-slider").value = bi;
-    if ($("mw-blocked")) $("mw-blocked").textContent = Math.round(frac * 100) + "%";
-    if ($("mw-monitors")) $("mw-monitors").textContent = lit + "/" + slots;
-    if ($("mw-note")) $("mw-note").innerHTML =
-      budget === 0 ? "No monitors staffed &mdash; every agent action is allowed through." :
-      `${lit}/${slots} monitors review the top-suspicion agent actions. HF-internal lateral movement stays <b>unmonitored</b>.`;
-    updateLiveTally();
+    setTxt("mw-blocked", Math.round(frac * 100) + "%");
+    setTxt("mw-reach", reach + "/" + total);
+    setTxt("mw-alarm", alarm ? alarm.date : "—");
+    setTxt("mw-mon", lit + "/" + slots + " monitors");
+    setTxt("mw-caught", o.caught); setTxt("mw-through", o.through);
+    if ($("mw-note")) $("mw-note").innerHTML = budget === 0
+      ? `No control, as in the real incident: every attack lands, the full blast radius falls, and nothing raises the alarm — the swarm ran <b>undetected until ~${undetected}</b>.`
+      : `Control blocks the top-suspicion actions, <b>contains the attack to ${reach}/${total} systems</b>, and <b>raises the alarm${alarm ? " on " + alarm.date : ""}</b> — vs undetected until ~${undetected} without it.`;
+    updateProjection(bi, reach, total, alarm, undetected);
   }
-  function updateLiveTally() {
-    // show a rolling per-interval count so the numbers stay small + legible
-    const t = SU.map.getTally ? SU.map.getTally() : { blocked: 0, passed: 0 };
-    if ($("mw-live")) $("mw-live").textContent = `${t.blocked} · ${t.passed}`;
-    if (SU.map.resetTally) SU.map.resetTally();
+  function updateProjection(bi, reach, total, alarm, undetected) {
+    const p = $("projection"); if (!p) return;
+    const budget = B.control.budgets[bi];
+    if (budget === 0) {
+      p.innerHTML = `<div class="pj-cap nocontrol"><span class="pj-label">No control</span>` +
+        `the documented kill chain runs to completion &mdash; <b>${total}/${total} systems</b>, undetected until <b>~${undetected}</b>.</div>`;
+    } else {
+      p.innerHTML = `<div class="pj-cap control"><span class="pj-label">Projection</span>` +
+        `at a <b>${budget}%</b> audit budget, control contains the swarm to <b>${reach}/${total} systems</b>.</div>` +
+        `<div class="pj-alarm${alarm ? " show" : ""}"><span class="dot"></span>ALARM: investigation triggered${alarm ? " · " + alarm.date : ""}</div>`;
+    }
   }
 
   // ------------------------------------------------------------- playback

@@ -6058,6 +6058,17 @@
   "anchor_budget": 2.0,
   "doc_detect_tick": 92,
   "alarm_blocked": 32,
+  "reach": [
+   13,
+   10,
+   8,
+   6,
+   5,
+   4,
+   3
+  ],
+  "nodes_total": 13,
+  "undetected_date": "Jul 19",
   "findings": [
    {
     "id": "F1",

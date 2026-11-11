@@ -20,6 +20,7 @@ SU.map = (function () {
 
   let B, state, handlers, svg, root, layers;
   let centers = {}, agentPos = {}, swarmPts = [], pulseEls = {}, agentById = {}, cellById = {};
+  let chainOrder = [], containedIds = new Set();
   let tr = { x: 0, y: 0, s: 1 }, drag = null;
   let boltTimer = null, blockThreshold = 1.1, sortedSusp = [];
   let tally = { blocked: 0, passed: 0, blind: 0 };
@@ -64,6 +65,7 @@ SU.map = (function () {
     B = opts.bundle; state = opts.state; handlers = opts.handlers || {};
     agentById = {}; B.agents.forEach((a) => (agentById[a.id] = a));
     cellById = {}; B.world.cells.forEach((c) => (cellById[c.id] = c));
+    chainOrder = [...B.world.cells].sort((a, b) => a.tick - b.tick).map((c) => c.id);
     B.segments.forEach((s) => (SEGMETA[s.id] = s));
     sortedSusp = B.timeline.acts.map((a) => a.susp).sort((x, y) => x - y);
 
@@ -559,12 +561,55 @@ SU.map = (function () {
     if (gateG) renderGate(bi);
     const sub = document.getElementById("gate-sub");
     if (sub) sub.textContent = `${B.control.budgets[bi]}% audited · ${Math.round(frac * 100)}% blocked`;
+    updateContainment(bi);
     return { budget: B.control.budgets[bi], blocked: frac, lit: MON_COUNT[bi] };
   }
   function getTally() { return { ...tally }; }
   function resetTally() { tally = { blocked: 0, passed: 0, blind: 0 }; }
   function monCount(bi) { return MON_COUNT[bi]; }
   function monSlots() { return MON_SLOTS; }
+
+  // --- deterministic control outcomes (not random bolt counts) ---
+  function kindOf(node) {
+    return node.route === "internal" ? "internal" : node.route === "lateral" ? "lateral"
+      : (node.seg === "ext" && node.stage === "Exfiltration") ? "exfil" : "egress";
+  }
+  function countOutcomes(uptoTick) {
+    let caught = 0, through = 0;
+    for (const a of B.timeline.acts) {
+      if (a.t > uptoTick) continue;
+      const node = cellById[a.node]; if (!node) continue;
+      const k = kindOf(node);
+      if (k === "internal" || k === "egress") { if (a.susp >= blockThreshold) caught++; else through++; }
+    }
+    return { caught, through };
+  }
+  function alarmInfo() {   // first tick cumulative caught crosses the alarm threshold
+    const alarm = B.control.alarm_blocked || 32, per = {};
+    for (const a of B.timeline.acts) {
+      const node = cellById[a.node]; if (!node) continue;
+      const k = kindOf(node);
+      if ((k === "internal" || k === "egress") && a.susp >= blockThreshold) per[a.t] = (per[a.t] || 0) + 1;
+    }
+    let cum = 0;
+    for (const t of Object.keys(per).map(Number).sort((x, y) => x - y)) {
+      cum += per[t]; if (cum >= alarm) return { tick: t, date: dateFor(t) };
+    }
+    return null;
+  }
+  function reachAt(bi) {
+    const r = B.control.reach || [];
+    return r.length ? r[Math.min(bi, r.length - 1)] : B.world.cells.length;
+  }
+  function dateFor(t) {
+    let best = B.timeline.phases[0];
+    B.timeline.phases.forEach((p) => { if (p.tick <= t) best = p; });
+    return best.date;
+  }
+  function updateContainment(bi) {
+    containedIds = new Set(chainOrder.slice(reachAt(bi)));
+    setTick(state.tick);
+  }
 
   // ------------------------------------------------- selection / tick
   function setSelected(id) {
@@ -589,10 +634,11 @@ SU.map = (function () {
     B.timeline.acts.forEach((a) => { if (a.t <= t && a.t > t - W) count[a.node] = (count[a.node] || 0) + 1; });
     B.world.cells.forEach((c) => {
       const pr = pulseEls[c.id]; if (!pr) return;
-      const reached = c.tick <= t, n = reached ? (count[c.id] || 0) : 0;
+      const contained = containedIds.has(c.id);   // control prevents this one
+      const reached = c.tick <= t, n = (reached && !contained) ? (count[c.id] || 0) : 0;
       pr.setAttribute("opacity", n ? Math.min(0.85, 0.28 + n * 0.11).toFixed(2) : "0");
       const g = layers.bldg.querySelector(`.cell[data-id="${c.id}"]`);
-      if (g) g.style.opacity = (t < B.timeline.ticks && !reached) ? "0.25" : "1";
+      if (g) g.style.opacity = contained ? "0.16" : ((t < B.timeline.ticks && !reached) ? "0.25" : "1");
     });
   }
 
@@ -663,6 +709,6 @@ SU.map = (function () {
     svg.addEventListener("click", () => { handlers.onSelect && handlers.onSelect(null); });
   }
 
-  const API = { init, setSelected, setTick, fit, zoomBy, zoomTo: (s) => zoomBy(s / tr.s), setBudget, getTally, resetTally, monCount, monSlots, GATE };
+  const API = { init, setSelected, setTick, fit, zoomBy, zoomTo: (s) => zoomBy(s / tr.s), setBudget, getTally, resetTally, monCount, monSlots, countOutcomes, alarmInfo, reachAt, GATE };
   return API;
 })();

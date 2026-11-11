@@ -444,10 +444,18 @@ def main():
          "evidence": "METR + swarmtraces"},
     ]
 
+    # MODELED/SCENARIO: systems the swarm reaches before control contains it, per
+    # budget. Without control (budget 0) the whole 13-node kill chain runs; more
+    # audit budget blocks the egress earlier, so fewer HF/external systems fall.
+    # Floored above 1 (coordination + breakout happen before the egress monitor).
+    N_NODES = len(NODES)
+    REACH = [N_NODES, 10, 8, 6, 5, 4, 3]
+
     control = {
         "budgets": BUDGETS, "blocks": BLOCKS, "residue": RESIDUE,
         "anchor_pct": 74, "anchor_budget": 2.0, "doc_detect_tick": 92,
-        "alarm_blocked": 32, "findings": findings, "triage": triage,
+        "alarm_blocked": 32, "reach": REACH, "nodes_total": N_NODES,
+        "undetected_date": "Jul 19", "findings": findings, "triage": triage,
         "categories": CATEGORIES,
     }
 
